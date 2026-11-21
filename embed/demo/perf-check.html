@@ -1,0 +1,96 @@
+<!doctype html><html><head><meta charset="utf-8"><title>perfcheck</title>
+<style>html,body{margin:0;background:#0a0b0c;color:#8a949c;font:11px monospace}
+#box{width:600px;height:480px}#log{padding:6px;white-space:pre}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Two performance properties, both of which were once quadratic-in-effect and
+// both asserted here as ratios rather than as milliseconds, so the check does not
+// depend on how fast the machine running it is.
+//
+//   1. Showing one layer must cost a fraction of showing all of them. The vertex
+//      shader used to be invoked for every stroke on the plate and then discard
+//      the hidden ones, so one layer cost the same as sixty-five.
+//   2. A burst of pointer moves must not draw once per move. Each move used to
+//      call draw() synchronously, so a trackpad -- which reports several moves per
+//      frame -- queued more work than could ever be shown.
+const failures = [];
+const check = (ok, what) => { log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) failures.push(what); };
+
+const p = mount(document.getElementById('box'), {
+  source: './fixtures/large.gcode', language: 'ru', remember: false,
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { if (s.kind === 'failed') document.title = 'FAIL ' + (s.message ?? ''); return; }
+    await sleep(500);
+    const canvas = document.querySelector('canvas');
+    const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+
+    // Wall clock is unusable here: the harness runs Chrome with virtual time, which
+    // fast-forwards timers and makes performance.now() report zeros. So the two
+    // properties are asserted on *counts of work* instead, which virtual time
+    // cannot fake:
+    //   1. how many instances a draw submits, read from the GPU's own draw call;
+    //   2. how many draws a burst of pointer moves causes.
+    // Both are exact integers and both are the thing that was wrong.
+    let instancesSubmitted = 0;
+    let drawCalls = 0;
+    const realDrawElementsInstanced = gl.drawElementsInstanced.bind(gl);
+    gl.drawElementsInstanced = (mode, count, type, offset, instances) => {
+      instancesSubmitted += instances;
+      drawCalls += 1;
+      return realDrawElementsInstanced(mode, count, type, offset, instances);
+    };
+    const realDrawArrays = gl.drawArrays.bind(gl);
+    gl.drawArrays = (...args) => { drawCalls += 1; return realDrawArrays(...args); };
+
+    const info = p.viewer.layerInfo();
+    check(info.count > 10, 'the fixture has ' + info.count + ' layers');
+
+    const countInstances = () => {
+      instancesSubmitted = 0;
+      p.viewer.redraw();
+      return instancesSubmitted;
+    };
+    const countDraws = () => {
+      drawCalls = 0;
+      p.viewer.redraw();
+      return drawCalls;
+    };
+
+    p.viewer.setLayerRange(0, info.count - 1, { dim: false });
+    await sleep(120);
+    const allInstances = countInstances();
+    check(allInstances > 50000, 'all layers submit ' + allInstances + ' instances');
+
+    p.viewer.setLayerRange(30, 30, { dim: false });
+    await sleep(120);
+    const oneInstances = countInstances();
+    check(oneInstances > 0 && oneInstances < allInstances * 0.2,
+      'one layer submits ' + oneInstances + ' instances, against ' + allInstances + ' for all');
+
+    // A draw must still happen, or the check above would pass with a blank screen.
+    check(countDraws() > 0, 'a frame issues ' + countDraws() + ' draw(s)');
+
+    // And a burst of pointer moves must not draw once each.
+    p.viewer.setLayerRange(0, info.count - 1, { dim: false });
+    await sleep(120);
+    canvas.setPointerCapture = () => {};
+    canvas.dispatchEvent(new PointerEvent('pointerdown', { clientX: 300, clientY: 240, button: 0, buttons: 1, bubbles: true, pointerId: 1 }));
+    drawCalls = 0;
+    for (let i = 0; i < 60; i += 1) {
+      canvas.dispatchEvent(new PointerEvent('pointermove', { clientX: 300 + i, clientY: 240, buttons: 1, bubbles: true, pointerId: 1 }));
+    }
+    const drawsFromMoves = drawCalls;
+    canvas.dispatchEvent(new PointerEvent('pointerup', { clientX: 400, clientY: 240, button: 0, buttons: 0, bubbles: true, pointerId: 1 }));
+    // Coalesced means zero or a handful, never one per move.
+    check(drawsFromMoves <= 5, '60 pointer moves caused ' + drawsFromMoves + ' draw(s)');
+    await sleep(200);
+
+    document.title = failures.length === 0 ? 'PERFCHECK ok' : 'FAIL ' + failures.join('; ');
+  },
+});
+</script></body></html>

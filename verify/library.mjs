@@ -222,6 +222,26 @@ const CHECKS = [
     pixels: { minColours: 8, minNonBackground: 0.005 },
   },
   {
+    // Both of these were "it feels slow" with no profiler to point at, and both are
+    // asserted on counts of work rather than on milliseconds -- the harness runs
+    // Chrome with virtual time, which makes every clock in the page report zero.
+    //
+    // 1. One layer used to submit every stroke on the plate and let the vertex
+    //    shader discard the hidden ones: 154 034 instances to show a single layer.
+    //    Measured at 15 of a frame's 20 milliseconds, and it did not improve as the
+    //    layer range narrowed, which is the tell.
+    // 2. Every pointer move called draw() synchronously. A trackpad reports several
+    //    moves per frame, so a drag queued more draws than could ever be shown:
+    //    60 moves, 60 draws.
+    name: 'embed: a layer range and a drag submit only the work they need',
+    page: 'perf-check.html',
+    size: [640, 540],
+    needs: 'large.gcode',
+    expect: /PERFCHECK ok/,
+    reject: /ERR|REJ|FAIL/,
+    pixels: { minColours: 8, minNonBackground: 0.01 },
+  },
+  {
     // Two bugs of the "fine until you toggle" kind, both in the seam between the
     // two render pipelines. The palette never reached the viewer on first open --
     // `syncPalette` updated the swatch row only, while the geometry is coloured by

@@ -1018,6 +1018,17 @@ export function createViewer(canvas) {
   // whether the layers under it are dimmed instead of hidden.
   let layerCount = 0;
   let layerRange = [0, 0];
+  /**
+   * First instance index of each layer, and how many strokes there are in total.
+   *
+   * A slicer writes layer by layer, so the strokes for one layer are one
+   * contiguous run of the instance buffer. That means the visible range can be
+   * drawn by offsetting into it and shortening the instance count, instead of
+   * submitting every stroke and letting the vertex shader discard the hidden
+   * ones. On a 153k-stroke plate the difference is most of the frame.
+   */
+  let layerFirst = null;
+  let strokeTotal = 0;
   let dimBelow = false;
   let indexCount = 0;
   let meshScale = 1;
@@ -1141,6 +1152,8 @@ export function createViewer(canvas) {
     layerCount = mesh.layerCount ?? 0;
     layerRange = [0, Math.max(0, layerCount - 1)];
     dimBelow = false;
+    layerFirst = mesh.layerFirst ?? null;
+    strokeTotal = mesh.segments ?? 0;
 
     meshCenter = [mesh.center[0], mesh.center[1], mesh.center[2]];
     const half = [
@@ -1183,6 +1196,8 @@ export function createViewer(canvas) {
     }
     segmentMode = false;
     segmentCount = 0;
+    layerFirst = null;
+    strokeTotal = 0;
     // A plain model carries no bed, so one left over from a sliced file must not
     // stay behind and be offered as if it belonged to this file.
     uploadBed(undefined);
@@ -1238,6 +1253,58 @@ export function createViewer(canvas) {
 
     zoom = 1;
     draw();
+  };
+
+  /**
+   * Draw on the next animation frame, coalescing repeated requests.
+   *
+   * A drag delivers pointer moves faster than the display refreshes -- a trackpad
+   * can report several per frame -- and each one called `draw()` synchronously. On
+   * a big plate a frame costs about twenty milliseconds, so the moves queued up
+   * faster than they could be drawn: every redundant frame was work thrown away,
+   * and the backlog is what a drag felt like. State still updates on every move;
+   * only the painting is coalesced.
+   */
+  let frameRequest = 0;
+  const requestDraw = () => {
+    if (frameRequest !== 0) return;
+    const run = () => {
+      frameRequest = 0;
+      draw();
+    };
+    if (typeof globalThis.requestAnimationFrame === 'function') {
+      frameRequest = globalThis.requestAnimationFrame(run);
+    } else {
+      frameRequest = globalThis.setTimeout(run, 16);
+    }
+  };
+
+  /**
+   * The slice of the instance buffer the current layer range needs.
+   *
+   * Returns `{ first, count }` in strokes. With `dimBelow` the hidden layers still
+   * draw, so the whole buffer is used; otherwise only the visible run is submitted,
+   * which is what keeps a slider drag from re-walking every layer.
+   *
+   * A mesh built before `layerFirst` existed has no offsets, and falls back to the
+   * whole buffer -- correct, just slower, which is the right way for a fallback to
+   * fail.
+   */
+  const visibleStrokes = () => {
+    if (layerFirst === null || layerFirst.length === 0) {
+      return { first: 0, count: segmentCount };
+    }
+    // `dimBelow` used to force the whole buffer, since the dimmed layers still
+    // draw. They are the layers *below* the range, which in a slicer's order means
+    // the run starts at the buffer's first stroke either way -- so the slice is
+    // still contiguous and the saving survives. Only the visible top changes it.
+    const low = Math.max(0, Math.min(layerFirst.length - 1, layerRange[0]));
+    const high = Math.max(low, Math.min(layerFirst.length - 1, layerRange[1]));
+    const first = dimBelow ? 0 : layerFirst[low];
+    // The layer after the last visible one starts the next run, so its offset is
+    // where this range ends; the final layer runs to the end of the buffer.
+    const end = high + 1 < layerFirst.length ? layerFirst[high + 1] : strokeTotal;
+    return { first, count: Math.max(0, end - first) };
   };
 
   const draw = () => {
@@ -1335,7 +1402,20 @@ export function createViewer(canvas) {
       gl.vertexAttribDivisor(segmentProgram.layer, 1);
 
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, segmentIndexBuffer);
-      gl.drawElementsInstanced(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0, segmentCount);
+      // Only the visible run of strokes is submitted. Instancing reads per-instance
+      // attributes from the start of the buffer, so the slice is expressed as a
+      // vertex-attribute offset on each one rather than as a draw offset -- a
+      // draw cannot skip instances, only whole draws.
+      const slice = visibleStrokes();
+      const byteOffset = slice.first * 12 * 4;
+      if (byteOffset > 0) {
+        gl.vertexAttribPointer(segmentProgram.positionA, 3, gl.FLOAT, false, stride, byteOffset);
+        gl.vertexAttribPointer(segmentProgram.positionB, 3, gl.FLOAT, false, stride, byteOffset + 3 * 4);
+        gl.vertexAttribPointer(segmentProgram.halfExtent, 2, gl.FLOAT, false, stride, byteOffset + 6 * 4);
+        gl.vertexAttribPointer(segmentProgram.colour, 3, gl.FLOAT, false, stride, byteOffset + 8 * 4);
+        gl.vertexAttribPointer(segmentProgram.layer, 1, gl.FLOAT, false, stride, byteOffset + 11 * 4);
+      }
+      gl.drawElementsInstanced(gl.TRIANGLES, indexCount, gl.UNSIGNED_SHORT, 0, slice.count);
       return;
     }
 
@@ -1498,7 +1578,8 @@ export function createViewer(canvas) {
       // The cube reads the same orbit, so it turns while the pointer drags.
       notifyOrbit();
     }
-    draw();
+    // Coalesced, not immediate: a drag reports moves faster than frames.
+    requestDraw();
   };
 
   /**
