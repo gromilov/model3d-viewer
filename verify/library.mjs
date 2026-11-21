@@ -222,6 +222,22 @@ const CHECKS = [
     pixels: { minColours: 8, minNonBackground: 0.005 },
   },
   {
+    // The bed's grid was a fixed cyan: legible on the dark backgrounds, nearly
+    // invisible on the light ones, and on white it was the strongest hue in the
+    // frame -- a reference grid has no business being the most colourful thing on
+    // screen. Its colour is now derived from the background, neutral in hue with
+    // its luminance opposite whatever is behind it. Checked on pixels: lighter than
+    // a dark backdrop, darker than a white one, and within a few units across
+    // channels in both cases. The old fixed colour reports a channel spread of 35.
+    name: 'embed: the bed grid answers to the background it is drawn on',
+    page: 'bed-check.html',
+    size: [500, 480],
+    needs: 'sliced.3mf',
+    expect: /BEDCHECK ok/,
+    reject: /ERR|REJ|FAIL/,
+    pixels: { minColours: 16, minNonBackground: 0.02 },
+  },
+  {
     // Both of these were "it feels slow" with no profiler to point at, and both are
     // asserted on counts of work rather than on milliseconds -- the harness runs
     // Chrome with virtual time, which makes every clock in the page report zero.

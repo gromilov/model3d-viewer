@@ -702,8 +702,15 @@ void main() {
  * background shows straight through.
  *
  * Two spacings are drawn -- a fine 10 mm mesh and a coarser 50 mm one -- because
- * one spacing reads as noise zoomed out and as emptiness zoomed in. Lines fade
- * toward the plate's edge so the bed ends rather than being cut off.
+ * one spacing reads as noise zoomed out and as emptiness zoomed in. The outline
+ * is drawn as its own line, so the plate ends where it ends instead of fading
+ * into a smear.
+ *
+ * The colour is derived from the background rather than fixed. A cyan grid was
+ * legible on the dark backgrounds and nearly invisible on the light ones, and on
+ * a white backdrop it was the only strong hue in the frame -- a reference grid
+ * should not be the most colourful thing on screen. Deriving it means one rule
+ * covers every background, including a host page's own.
  */
 const BED_FRAGMENT_SHADER = `
 precision mediump float;
@@ -712,38 +719,56 @@ uniform vec3 uGridColour;
 uniform vec3 uAxisColour;
 uniform float uOpacity;
 uniform vec2 uBedCentre;
+uniform vec2 uBedHalf;
 uniform float uBedExtent;
+uniform float uPixelScale;
 
-// One ruling on a repeating coordinate.
-//
-// GLSL ES 1.00 has no fwidth without an extension pragma, and a shader that
-// fails to compile takes the whole view down, so the line width is a fixed
-// fraction of the spacing instead: thin enough to read as a hairline at the
-// framing the plate is usually seen at, without being invisible when zoomed out.
-float ruler(vec2 world, float spacing, float width) {
-  vec2 cell = abs(fract(world / spacing - 0.5) - 0.5) * spacing;
-  vec2 line = vec2(1.0) - smoothstep(vec2(0.0), vec2(spacing * 0.02 * width), cell);
-  return max(line.x, line.y);
+/**
+ * One ruling on a repeating coordinate, antialiased against the screen.
+ *
+ * The lines used to have a fixed width in millimetres, which meant they were
+ * crisp at one zoom and either invisible or a wide smear at any other. The width
+ * here is stated in pixels and converted to world units by the caller, so a
+ * ruling is a hairline at every zoom level.
+ *
+ * uPixelScale is how many world millimetres one screen pixel covers; a line is
+ * then a ramp of that width rather than a step, which is what makes it smooth
+ * without fwidth, which GLSL ES 1.00 does not have without an extension.
+ */
+float ruling(float coordinate, float spacing, float width) {
+  float distance = abs(fract(coordinate / spacing - 0.5) - 0.5) * spacing;
+  float halfWidth = width * uPixelScale * 0.5;
+  return 1.0 - smoothstep(halfWidth - uPixelScale, halfWidth + uPixelScale, distance);
 }
 
 void main() {
   vec2 world = vWorld.xy;
 
-  float fine = ruler(world, 10.0, 1.0) * 0.30;
-  float coarse = ruler(world, 50.0, 1.5);
-  // The plate's own axes, brighter than its rulings.
-  float axis = max(1.0 - smoothstep(0.0, 0.5, abs(world.x)),
-                   1.0 - smoothstep(0.0, 0.5, abs(world.y)));
+  // Two spacings, the coarse one stronger: it is what the eye counts. The fine
+  // mesh is context and is kept well below it -- at equal strength the two read as
+  // one busy hatch rather than as millimetres and centimetres.
+  float fine = max(ruling(world.x, 10.0, 1.0), ruling(world.y, 10.0, 1.0)) * 0.16;
+  float coarse = max(ruling(world.x, 50.0, 1.0), ruling(world.y, 50.0, 1.0)) * 0.85;
+
+  // The plate's own axes, a touch brighter than its rulings.
+  float axis = max(1.0 - smoothstep(0.0, 0.6, abs(world.x)),
+                   1.0 - smoothstep(0.0, 0.6, abs(world.y)));
 
   vec3 colour = mix(uGridColour, uAxisColour, axis);
+  float strength = max(fine, coarse) * mix(0.65, 1.0, axis);
 
-  // End the bed at its edge instead of cutting it off square. Measured from the
-  // bed's own centre: measuring from the origin, which is a corner of an
-  // ordinary build plate, fades one corner and leaves the opposite one bright.
-  float fade = 1.0 - smoothstep(0.55, 1.0, length(world - uBedCentre) / uBedExtent);
+  // A drawn outline, not a fade. The old version faded the whole plate out
+  // radially, which left the corners as grey smudges and made the bed look
+  // stained rather than bounded.
+  vec2 edge = uBedHalf - abs(world - uBedCentre);
+  float nearest = min(edge.x, edge.y);
+  float border = 1.0 - smoothstep(0.0, 1.4 * uPixelScale, abs(nearest));
+  // Outside the plate there is nothing at all.
+  float inside = 1.0 - smoothstep(-uPixelScale, uPixelScale, -nearest);
+  if (inside <= 0.0) discard;
 
-  float strength = max(fine, coarse) * fade;
-  if (strength < 0.01) discard;
+  strength = max(strength, border * 1.15) * inside;
+  if (strength < 0.004) discard;
   gl_FragColor = vec4(colour, strength * uOpacity);
 }
 `;
@@ -826,7 +851,9 @@ function createBedProgram(gl) {
     gridColour: gl.getUniformLocation(program, 'uGridColour'),
     axisColour: gl.getUniformLocation(program, 'uAxisColour'),
     bedCentre: gl.getUniformLocation(program, 'uBedCentre'),
+    bedHalf: gl.getUniformLocation(program, 'uBedHalf'),
     bedExtent: gl.getUniformLocation(program, 'uBedExtent'),
+    pixelScale: gl.getUniformLocation(program, 'uPixelScale'),
     opacity: gl.getUniformLocation(program, 'uOpacity'),
   };
 }
@@ -1471,6 +1498,39 @@ export function createViewer(canvas) {
   };
 
   /** Draw the bed slab under whatever the current view shows. */
+  /**
+   * The grid's colour, derived from whatever is behind it.
+   *
+   * A fixed cyan was legible on the dark backgrounds and nearly invisible on the
+   * light ones, and on white it was the strongest hue in the frame -- a reference
+   * grid has no business being the most colourful thing on screen. So the colour
+   * is neutral by construction and only its *luminance* is chosen, opposite to the
+   * background's: a light line on a dark scene, a dark one on a light scene.
+   *
+   * The background can be transparent, in which case there is no colour to answer
+   * to; the sidebar's own surface is a mid-dark graphite, and the grid is drawn
+   * for that.
+   */
+  const gridColours = () => {
+    // What the plate is being drawn over, in unit RGB.
+    const behind = background ?? [0.11, 0.12, 0.13];
+    // Rec. 709 relative luminance: how light the backdrop reads.
+    const luma = 0.2126 * behind[0] + 0.7152 * behind[1] + 0.0722 * behind[2];
+    const lightBackdrop = luma > 0.45;
+    // Neutral, not tinted: the three channels differ only enough to keep the line
+    // from looking like a dead grey. A cool cast on everything was what made the
+    // old grid fight the filament colours.
+    const tint = [1.0, 0.995, 0.985];
+    // Contrast against the backdrop, and how strongly the plate reads.
+    // A dark line on a light backdrop needs far less contrast than a light line on
+    // a dark one to read at the same strength: the eye is more sensitive above the
+    // background than below it. 0.24 was still heavy on the light options.
+    const level = lightBackdrop ? 0.42 : 0.92;
+    const base = tint.map((channel) => channel * level);
+    const axis = base.map((channel) => channel * (lightBackdrop ? 0.62 : 1.28));
+    return { grid: base, axis, opacity: lightBackdrop ? 0.40 : 0.52 };
+  };
+
   const drawBed = (target, aspect, eye, distance) => {
     const [nearPlane, farPlane] = clipPlanes(distance);
     gl.useProgram(bedProgram.program);
@@ -1478,12 +1538,24 @@ export function createViewer(canvas) {
     gl.uniformMatrix4fv(bedProgram.view, false, lookAt(eye, target, [0, 0, 1]));
     gl.uniform3f(bedProgram.center, meshCenter[0], meshCenter[1], meshCenter[2]);
     gl.uniform1f(bedProgram.scale, meshScale);
-    // A cool cyan grid over nothing: the plate is a reference, so it is drawn
-    // only as rulings, and they fade out at the edge on their own.
-    gl.uniform3f(bedProgram.gridColour, 0.36, 0.62, 0.72);
-    gl.uniform3f(bedProgram.axisColour, 0.44, 0.88, 1.0);
-    gl.uniform1f(bedProgram.opacity, 0.55);
-    // The fade is measured from the plate's own centre, which the outline states.
+
+    const colours = gridColours();
+    gl.uniform3f(bedProgram.gridColour, colours.grid[0], colours.grid[1], colours.grid[2]);
+    gl.uniform3f(bedProgram.axisColour, colours.axis[0], colours.axis[1], colours.axis[2]);
+    gl.uniform1f(bedProgram.opacity, colours.opacity);
+
+    // How many millimetres one screen pixel covers at the plate's own centre, so a
+    // ruling can be one pixel wide at every zoom. The view spans
+    // `2 * tan(fov/2) * distance` world units over the canvas height, and the
+    // scene is normalised to radius 1, so one unit is one over the mesh scale in
+    // millimetres.
+    const viewHeight = 2 * Math.tan(FIELD_OF_VIEW / 2) * distance;
+    const pixelsTall = Math.max(1, canvas.height);
+    const worldPerPixel = viewHeight / pixelsTall;
+    gl.uniform1f(bedProgram.pixelScale, worldPerPixel / Math.max(meshScale, 1e-9));
+
+    // The plate's own bounds: the centre it fades from, and its half-size, which
+    // the outline is drawn along.
     const bed = bedBounds;
     if (bed !== null && bed.minimum !== undefined && bed.maximum !== undefined) {
       gl.uniform2f(
@@ -1491,12 +1563,18 @@ export function createViewer(canvas) {
         (bed.minimum[0] + bed.maximum[0]) / 2,
         (bed.minimum[1] + bed.maximum[1]) / 2,
       );
+      gl.uniform2f(
+        bedProgram.bedHalf,
+        Math.abs(bed.maximum[0] - bed.minimum[0]) / 2,
+        Math.abs(bed.maximum[1] - bed.minimum[1]) / 2,
+      );
       gl.uniform1f(
         bedProgram.bedExtent,
         Math.hypot(bed.maximum[0] - bed.minimum[0], bed.maximum[1] - bed.minimum[1]) / 2,
       );
     } else {
       gl.uniform2f(bedProgram.bedCentre, 0, 0);
+      gl.uniform2f(bedProgram.bedHalf, 1, 1);
       gl.uniform1f(bedProgram.bedExtent, 1);
     }
 
@@ -1617,6 +1695,21 @@ export function createViewer(canvas) {
     if (dragging === null) return;
     dragging = null;
     canvas.style.cursor = 'grab';
+  };
+
+  /**
+   * Set the zoom directly.
+   *
+   * The wheel is the only way in from the interface, and that is right for a
+   * viewer -- but a zoom level is state, and state that cannot be set from outside
+   * cannot be restored or asserted on. Clamped to the same range the wheel uses.
+   *
+   * @param value - 1 is the framing distance; smaller is closer.
+   */
+  const setZoom = (value) => {
+    if (!Number.isFinite(value) || value <= 0) return;
+    zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, value));
+    draw();
   };
 
   const onWheel = (event) => {
@@ -2135,5 +2228,5 @@ export function createViewer(canvas) {
     gl.deleteProgram(bedProgram.program);
   };
 
-  return { setMesh, setMode, setLayerRange, layerInfo, setBedVisible, bedInfo, setView, setOrbit, orientation, sceneState, setBackground, backgroundInfo, setPlainLighting, plainLightingInfo, renderer: () => rendererInfo, setSurface, surfaceInfo, setLightLevel, renderToImage, setPalette, paletteInfo, watchOrbit, reset, dispose, redraw: draw, usesColours };
+  return { setMesh, setMode, setLayerRange, layerInfo, setBedVisible, bedInfo, setView, setOrbit, orientation, sceneState, setBackground, backgroundInfo, setPlainLighting, plainLightingInfo, renderer: () => rendererInfo, setSurface, surfaceInfo, setLightLevel, renderToImage, setPalette, paletteInfo, watchOrbit, reset, dispose, redraw: draw, usesColours, setZoom, zoomInfo: () => zoom };
 }
