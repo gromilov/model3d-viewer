@@ -1,0 +1,47 @@
+<!doctype html><html><head><meta charset="utf-8"><title>persist-visual</title>
+<style>body{margin:0;background:#0a0b0c}#box{width:800px;height:560px}</style></head>
+<body><div id="box"></div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+// Two panels: the first sets a distinctive look and saves it, the second opens the
+// same file with nothing but the stored settings to go on. If the picture differs,
+// the round trip is broken.
+const KEY = 'visual-check';
+localStorage.removeItem('model3d:file:' + KEY);
+const box = document.getElementById('box');
+
+function open() {
+  return new Promise((resolve) => {
+    const host = document.createElement('div');
+    host.style.width = '800px';
+    host.style.height = '560px';
+    box.append(host);
+    const panel = mount(host, {
+      source: './fixtures/sliced.3mf', language: 'ru',
+      storageKey: KEY, remember: true,
+      onStatus: (s) => {
+        if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); return; }
+        setTimeout(() => resolve(panel), 200);
+      },
+    });
+  });
+}
+
+const first = await open();
+first.toggleBed();                    // bed + cube
+first.togglePlainLighting();          // material mode
+first.setBackground('#dfe3e8');       // a light backdrop: obvious in the frame
+first.setFilament(0, '#00ff88');
+first.setOrbit(0.4, 0.9);             // look down from above
+first.flushSave();
+// The panel disposes itself; the host element is the caller's, so the caller
+// removes it. Leaning on dispose() to remove it would hide a real question --
+// whose element is it -- behind a convenience.
+const firstHost = first.host;
+first.dispose();
+firstHost.parentElement?.removeChild(firstHost);
+
+const second = await open();
+document.title = 'VISUAL ' + (second.state.background ?? 'none') + ' ' + (second.state.bed.visible ? 'bed' : 'nobed');
+globalThis.__panel = second;
+</script></body></html>

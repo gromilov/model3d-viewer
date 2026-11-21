@@ -1,0 +1,66 @@
+{
+  "rgb8": {
+    "width": 37,
+    "height": 23,
+    "colorType": 2,
+    "bitDepth": 8,
+    "rgbaSha256": "904cb5a06461cc982641d64172815a6ecbde29573c55e37ea15373d028116d76",
+    "bytes": 3404
+  },
+  "rgba8": {
+    "width": 37,
+    "height": 23,
+    "colorType": 6,
+    "bitDepth": 8,
+    "rgbaSha256": "9113f9b8cef2fbdebd3abd51da4f07708aff2f342f5fb42c967674622150133a",
+    "bytes": 3404
+  },
+  "gray8": {
+    "width": 37,
+    "height": 23,
+    "colorType": 0,
+    "bitDepth": 8,
+    "rgbaSha256": "18713a3abc5e9db79f2d272f44fac831249aa25e2a758498a68614bba105cf90",
+    "bytes": 3404
+  },
+  "graya8": {
+    "width": 37,
+    "height": 23,
+    "colorType": 4,
+    "bitDepth": 8,
+    "rgbaSha256": "86307accc8b6e8d7aeebbf36061804d1a10bbd5dad4e770e284c7b89f592231b",
+    "bytes": 3404
+  },
+  "pal4": {
+    "width": 37,
+    "height": 23,
+    "colorType": 3,
+    "bitDepth": 4,
+    "rgbaSha256": "6d247cb9771ada1a334b92f9932aeb1c3d2c99f39443ca5a8014f24e84264ba6",
+    "bytes": 3404
+  },
+  "rgb16": {
+    "width": 37,
+    "height": 23,
+    "colorType": 2,
+    "bitDepth": 16,
+    "rgbaSha256": "904cb5a06461cc982641d64172815a6ecbde29573c55e37ea15373d028116d76",
+    "bytes": 3404
+  },
+  "gray1": {
+    "width": 37,
+    "height": 23,
+    "colorType": 0,
+    "bitDepth": 1,
+    "rgbaSha256": "c3edd8f682c5bebfbca21f058004b8afe4a8d8a2112a0d61815cb58f6b1e0034",
+    "bytes": 3404
+  },
+  "rgba-opaque": {
+    "width": 5,
+    "height": 8,
+    "colorType": 6,
+    "bitDepth": 8,
+    "rgbaSha256": "d479298f3dd9aa5e34f8c3c12157a40a671afb206d9903d6d3516ed6b044217d",
+    "bytes": 160
+  }
+}

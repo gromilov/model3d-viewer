@@ -1,0 +1,8 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>no webgl control</title></head><body>
+<script>
+// Negative control: the page reports failure the way the reference page would if
+// createViewer() threw, so the DOM checks must catch it.
+document.title = 'POC FAIL no webgl context';
+document.body.textContent = 'nothing rendered';
+</script></body></html>

@@ -1,0 +1,51 @@
+<!doctype html><html><head><meta charset="utf-8"><title>leak</title>
+<style>.box{width:600px;height:400px}</style></head>
+<body><div id="stage"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = document.getElementById('log');
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+
+// A browser allows a limited number of live WebGL contexts (16-ish). Creating and
+// disposing panels must not accumulate them, or an app that opens and closes a
+// viewer repeatedly dies partway through with "too many contexts". This is the
+// failure mode a single mount never shows, and the reason dispose() matters more
+// than it looks.
+const ROUNDS = 12;
+let completed = 0;
+const stage = document.getElementById('stage');
+
+async function round(n) {
+  return new Promise((resolve) => {
+    const box = document.createElement('div');
+    box.className = 'box';
+    stage.append(box);
+    const panel = mount(box, {
+      source: './models/holder.stl',
+      language: 'en',
+      onStatus: (s) => {
+        if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); resolve(); return; }
+        setTimeout(() => {
+          const lost = panel.viewer === null;
+          panel.dispose();
+          box.remove();
+          if (lost) document.title = 'FAIL lost viewer';
+          resolve();
+        }, 80);
+      },
+    });
+  });
+}
+
+try {
+  for (let n = 0; n < ROUNDS; n += 1) {
+    await round(n);
+    completed += 1;
+    log.textContent = 'rounds: ' + completed;
+  }
+  document.title = 'LEAK OK rounds=' + completed;
+} catch (e) {
+  document.title = 'THROW ' + e.message;
+}
+</script></body></html>

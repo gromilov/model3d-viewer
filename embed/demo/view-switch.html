@@ -1,0 +1,72 @@
+<!doctype html><html><head><meta charset="utf-8"><title>viewswitch</title>
+<style>html,body{margin:0;background:#1a1d22;color:#8a949c;font:11px monospace}
+#box{width:400px;height:400px}#log{padding:6px;white-space:pre}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Two ways a view switch broke the picture, both measured here.
+//
+// 1. The palette never reached the viewer on first open. `syncPalette` updated the
+//    swatch row only; the geometry is coloured by `setPalette`, which only ran when
+//    a colour was edited. So the model view drew with an empty palette until a trip
+//    through the sliced view happened to set it.
+// 2. Vertex attribute divisors leaked between the two pipelines. The stroke path
+//    sets `divisor = 1` on the attribute indices it instanced; the triangle path
+//    never reset them, so a model drawn after a plate read one colour per triangle
+//    instead of per vertex, and came back as a flat silhouette.
+//
+// The first is asserted on the state, the second on the rendered pixels: colour
+// richness is the thing that collapses, and it is visible without a reference image.
+const failures = [];
+const check = (ok, what) => { log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) failures.push(what); };
+
+const p = mount(document.getElementById('box'), {
+  source: './fixtures/dup.3mf', language: 'ru', remember: false, view: 'model',
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { if (s.kind === 'failed') document.title = 'FAIL ' + (s.message ?? ''); return; }
+    await sleep(700);
+    p.viewer.setOrbit(0.9, 0.55);
+    await sleep(500);
+
+    const canvas = document.querySelector('canvas');
+    const stats = () => {
+      const c = document.createElement('canvas');
+      c.width = canvas.width; c.height = canvas.height;
+      const g = c.getContext('2d');
+      g.drawImage(canvas, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height).data;
+      const seen = new Set();
+      let ink = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] < 8) continue;      // transparent: nothing drawn here
+        ink += 1;
+        seen.add((d[i] >> 4) + ',' + (d[i + 1] >> 4) + ',' + (d[i + 2] >> 4));
+      }
+      return { ink, colours: seen.size };
+    };
+
+    check(p.viewer.sceneState().paletteCount > 0,
+      'palette reaches the viewer on open (' + p.viewer.sceneState().paletteCount + ' slots)');
+
+    const before = stats();
+    check(before.ink > 1000, 'the model view drew ' + before.ink + ' opaque pixels');
+
+    p.setView('sliced'); await sleep(700);
+    p.setView('model');  await sleep(700);
+    const after = stats();
+
+    check(after.ink > before.ink * 0.9, 'same coverage after the switch (' + after.ink + ' vs ' + before.ink + ')');
+    // A flat fill is what the divisor leak looked like: dozens of shades collapsed
+    // to a handful. Half is a generous line, well clear of both outcomes.
+    check(after.colours > before.colours / 2,
+      'colour richness preserved (' + before.colours + ' -> ' + after.colours + ' shades)');
+
+    document.title = failures.length === 0 ? 'VIEWSWITCH ok' : 'FAIL ' + failures.join('; ');
+  },
+});
+</script></body></html>

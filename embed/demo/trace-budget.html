@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset="utf-8"><title>budget</title>
+<style>body{margin:0;background:#0a0b0c;color:#8a949c;font:11px monospace}
+#box{width:600px;height:480px}#log{padding:6px;white-space:pre}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The pass loop armed a frame callback and a watchdog timer at once and let both
+// stand. On a plate whose pass outran the watchdog the timer won the race and the
+// abandoned frame callback started a second pass chain beside the first -- two
+// became four, and the counter climbed past its budget while the tab froze. The
+// order file showed 109 samples against a budget of 96.
+//
+// Two things make this deterministic. Frame callbacks are made slower than the
+// watchdog, so the timer always wins -- the real ordering on a heavy plate. And the
+// budget is lowered, so the run is a couple of seconds instead of a minute; the
+// overshoot does not depend on how big the budget is, only on the doubled chains.
+//
+// Nothing here reads a clock. Under Chrome's virtual time every timer in the page is
+// fast-forwarded, so elapsed milliseconds measure nothing; the assertions are all
+// about the sample counter and the number of wakeups.
+let armed = 0;
+globalThis.requestAnimationFrame = (fn) => { armed += 1; return setTimeout(() => fn(0), 1500); };
+globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+
+const BUDGET = 12;
+
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/large.gcode', language: 'ru', remember: false,
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); return; }
+    await sleep(200);
+    panel.constructor.maxTraceSamples = BUDGET;
+    panel.startTrace();
+
+    // Poll a fixed number of times and stop once the counter has been still for a
+    // stretch: a fixed duration would be a duration of virtual time, which passes
+    // while no sample lands.
+    let highest = 0;
+    let still = 0;
+    for (let poll = 0; poll < 3000; poll += 1) {
+      await sleep(10);
+      if (panel.state.traceSamples > highest) { highest = panel.state.traceSamples; still = 0; }
+      else if (highest > 0) { still += 1; if (still > 200) break; }
+    }
+    panel.stopTrace();
+    log('budget: ' + BUDGET + ', highest: ' + highest + ', armed: ' + armed);
+    if (highest === 0) { document.title = 'FAIL no samples landed'; return; }
+    if (highest > BUDGET) { document.title = 'FAIL over budget: ' + highest + ' > ' + BUDGET; return; }
+    // One wakeup per pass. Doubling would show up here as far more than the budget.
+    if (armed > BUDGET * 2 + 8) { document.title = 'FAIL chains: ' + armed + ' wakeups for ' + highest + ' passes'; return; }
+    document.title = 'BUDGET budget=' + BUDGET + ' highest=' + highest + ' armed=' + armed;
+  },
+});
+</script></body></html>

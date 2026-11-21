@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>model3d-viewer</title>
+<style>
+  /* The demo's own chrome, deliberately not the viewer's: the point of the page
+     is to show that the panel works inside someone else's layout. */
+  :root { color-scheme: dark; }
+  body {
+    margin: 0;
+    background: #0b0c0d;
+    color: #d6d8db;
+    font: 13px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    flex-wrap: wrap;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  }
+  h1 { margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.04em; }
+  .hint { color: rgba(214, 216, 219, 0.5); font-size: 11px; }
+  .sources { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+  .sources button {
+    appearance: none;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 3px;
+    color: rgba(214, 216, 219, 0.7);
+    font: inherit;
+    font-size: 11px;
+    padding: 3px 9px;
+    cursor: pointer;
+  }
+  .sources button:hover { border-color: #4cc4dd; color: #4cc4dd; }
+  .sources button.is-active { border-color: #4cc4dd; color: #4cc4dd; background: rgba(76, 196, 221, 0.10); }
+
+  /* The host decides the box; the panel fills it. */
+  main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 14px;
+    padding: 14px 18px;
+    height: calc(100vh - 60px);
+    box-sizing: border-box;
+  }
+  #viewer {
+    min-width: 0;
+    min-height: 0;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  aside { min-height: 0; overflow: auto; font-size: 11px; color: rgba(214, 216, 219, 0.6); }
+  aside h2 { font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: rgba(214, 216, 219, 0.4); margin: 0 0 6px; }
+  aside pre {
+    margin: 0 0 16px;
+    padding: 9px 11px;
+    background: #131416;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 3px;
+    overflow-x: auto;
+    color: #b9c2c8;
+  }
+  @media (max-width: 780px) {
+    main { grid-template-columns: minmax(0, 1fr); height: auto; }
+    #viewer { height: 62vh; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>model3d-viewer</h1>
+  <span class="hint">one script, one element, no build step, no React</span>
+  <div class="sources" id="sources"></div>
+</header>
+
+<main>
+  <div id="viewer"></div>
+  <aside>
+    <h2>Markup</h2>
+    <pre>&lt;script src="embed/dist/model3d-viewer.js"&gt;&lt;/script&gt;
+
+&lt;model3d-viewer
+  src="./part.3mf"
+  language="ru"
+  style="height: 480px"&gt;
+&lt;/model3d-viewer&gt;</pre>
+
+    <h2>Or from script</h2>
+    <pre>import { mount } from './model3d-viewer.mjs';
+
+const panel = mount(document.querySelector('#box'), {
+  source: './part.3mf',
+  language: 'ru',
+});
+
+// panel.dispose() releases the GPU</pre>
+
+    <h2>One face of it</h2>
+    <pre>reset · model / sliced
+plain lighting · build plate
+save PNG · background
+filament palette
+per-filament matte,
+metalness, transparency
+studio light level
+layer slider + one layer
+navigation cube</pre>
+
+    <h2>Here</h2>
+    <p id="status">loading…</p>
+  </aside>
+</main>
+
+<script type="module">
+  import { mount } from '../dist/model3d-viewer.mjs';
+
+  // Two STLs that ship with the demo, so cloning the repository is enough to see
+  // the viewer work. A 3MF with filament colours and a sliced plate is what shows
+  // the rest of it, and those files are the user's own prints rather than
+  // something to commit -- `verify/fixtures.mjs` copies one into
+  // `demo/fixtures/` when the workspace has it, and the demo lists it then.
+  const SOURCES = [
+    { label: 'holder STL', url: './models/holder.stl' },
+    { label: 'bracket STL', url: './models/bracket.stl' },
+  ];
+  // A fixture the verification suite stages, if it is there.
+  try {
+    const probe = await fetch('./fixtures/sliced.3mf', { method: 'HEAD' });
+    if (probe.ok) SOURCES.push({ label: 'sliced 3MF', url: './fixtures/sliced.3mf' });
+  } catch {
+    // No fixture staged: the two STLs are the whole demo, which is fine.
+  }
+
+  const box = document.querySelector('#viewer');
+  const status = document.querySelector('#status');
+  const bar = document.querySelector('#sources');
+
+  let panel = null;
+  // Open on a bundled STL, always: the demo has to work from a bare clone. The
+  // 3MF is what shows the colour and layer handling, and it is one click away
+  // when a fixture has been staged.
+  let current = SOURCES[0];
+
+  function show(source, button) {
+    current = source;
+    panel?.dispose();
+    for (const other of bar.children) other.classList.toggle('is-active', other === button);
+    status.textContent = `${source.label}\n${source.url}`;
+    panel = mount(box, {
+      source: source.url,
+      language: 'ru',
+      onStatus: (state) => {
+        if (state.kind === 'failed') status.textContent = `failed: ${state.message}`;
+      },
+    });
+    // Exposed for the headless checks, which read it out of the dumped DOM.
+    globalThis.__panel = panel;
+    document.title = `mounted ${source.label}`;
+  }
+
+  for (const source of SOURCES) {
+    const button = document.createElement('button');
+    button.textContent = source.label;
+    button.onclick = () => show(source, button);
+    bar.append(button);
+    if (source === current) button.classList.add('is-active');
+  }
+
+  show(current, bar.children[0]);
+</script>
+</body>
+</html>

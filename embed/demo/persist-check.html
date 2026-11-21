@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>persist</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0a0b0c; color: #d6d8db; font: 12px/1.5 ui-monospace, Menlo, monospace; }
+  #box { width: 700px; height: 480px; margin: 8px; }
+  #log { margin: 8px; white-space: pre; color: #8a949c; }
+</style>
+</head>
+<body>
+<div id="box"></div>
+<div id="log">start</div>
+<script>
+  const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+  window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+  window.addEventListener('unhandledrejection', (e) => {
+    document.title = 'REJ ' + (e.reason?.message ?? e.reason);
+  });
+</script>
+<script type="module">
+  import { mount } from '../dist/model3d-viewer.mjs';
+
+  // The point of the check: settings written by one panel must come back in a
+  // *second* panel built from scratch. That is the closest a single page gets to
+  // the real case -- closing a tab and opening the file again -- and it is the
+  // only way to prove the round trip rather than just that a write happened.
+  const box = document.getElementById('box');
+  const results = [];
+  const check = (name, source) => {
+    try {
+      const value = typeof source === 'function' ? source() : source;
+      results.push(`${name}=${value}`);
+    } catch (error) {
+      results.push(`${name}=THREW(${error.message})`);
+    }
+  };
+
+  // A fresh key per run, so a previous run's leftovers cannot make this pass.
+  const key = 'persist-check-' + (globalThis.__runId ?? 'r1');
+  const options = {
+    source: './models/holder.stl',
+    language: 'en',
+    storageKey: key,
+    // The module-level check that remembering is off by default is not what this
+    // page tests, so it asks for storage explicitly.
+    remember: true,
+  };
+
+  function makePanel() {
+    return new Promise((resolve) => {
+      const host = document.createElement('div');
+      host.style.width = '700px';
+      host.style.height = '480px';
+      box.append(host);
+      const panel = mount(host, {
+        ...options,
+        onStatus: (s) => {
+          if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); resolve(null); return; }
+          setTimeout(() => resolve(panel), 150);
+        },
+      });
+    });
+  }
+
+  // --- First panel: change every persisted setting. ------------------------
+  const first = await makePanel();
+  if (first === null) throw new Error('first panel failed');
+
+  // Start from a known state, because a previous run may have left one behind.
+  first.reset();
+  const before = {
+    plainLighting: first.state.plainLighting,
+    bed: first.state.bed.visible,
+    background: first.state.background,
+    light: first.state.lightLevel,
+  };
+  log('defaults: ' + JSON.stringify(before));
+
+  first.togglePlainLighting();          // material mode
+  first.toggleBed();                    // bed + cube on
+  first.setBackground('#2b3138');       // a definite backdrop
+  first.setLightLevel(1.45);
+  first.selectSlot(0);
+  first.setSurface(0, { matte: 0.17, metalness: 0.83, transparency: 0.11 });
+  first.setFilament(0, '#00ff88');
+  first.setOrbit(0.9, 0.35);
+  if (first.state.layers !== null) first.setLayers(0, 3, true);
+  // Flush rather than wait: the debouncer is 400 ms and this check should not
+  // depend on a timer having elapsed.
+  first.flushSave();
+  first.dispose();
+
+  check('savedRaw', () => {
+    const raw = localStorage.getItem('model3d:file:' + key);
+    return raw === null ? 'none' : 'present';
+  });
+
+  // --- Second panel: the same file, built fresh. ---------------------------
+  const second = await makePanel();
+  if (second === null) throw new Error('second panel failed');
+
+  const surfaces = second.viewer.surfaceInfo().surfaces;
+  check('plainLighting', second.state.plainLighting);
+  check('bedVisible', second.state.bed.visible);
+  check('background', second.viewer.backgroundInfo());
+  check('lightLevel', second.viewer.surfaceInfo().lightLevel.toFixed(2));
+  check('matte', surfaces[0].matte.toFixed(2));
+  check('metalness', surfaces[0].metalness.toFixed(2));
+  check('transparency', surfaces[0].transparency.toFixed(2));
+  // An STL carries no filament palette, so there is nothing to recolour and the
+  // override is expected to be ignored rather than invented. The 3MF check below
+  // covers the case where a palette really exists.
+  check('paletteAbsent', String(second.palette()));
+  check('cameraYaw', second.viewer.orientation().yaw.toFixed(2));
+  check('cameraPitch', second.viewer.orientation().pitch.toFixed(2));
+  check('navCubeMounted', second.navCube !== null);
+
+  // --- Reset must forget ---------------------------------------------------
+  second.reset();
+  check('afterResetStoreEmpty', () => {
+    return localStorage.getItem('model3d:file:' + key) === null ? 'empty' : 'still-there';
+  });
+  second.dispose();
+
+  // --- A third panel opens on the defaults again. --------------------------
+  const third = await makePanel();
+  check('thirdIsDefaultLighting', third.state.plainLighting);
+  check('thirdBackground', String(third.state.background));
+  third.dispose();
+
+  // --- Remembering can be turned off entirely. -----------------------------
+  const host = document.createElement('div');
+  host.style.width = '400px';
+  host.style.height = '300px';
+  box.append(host);
+  const off = mount(host, { ...options, remember: false, storageKey: key + '-off' });
+  await new Promise((r) => setTimeout(r, 400));
+  off.togglePlainLighting();
+  off.flushSave();
+  check('rememberOffStoreEmpty', () => {
+    return localStorage.getItem('model3d:file:' + key + '-off') === null ? 'empty' : 'written';
+  });
+  off.dispose();
+
+  localStorage.removeItem('model3d:file:' + key);
+
+  // --- The same round trip on a file that has a bed and a palette. ----------
+  // An STL has neither, so the two settings that most need remembering -- which
+  // filaments are recoloured, and whether the plate is shown -- cannot be tested
+  // on it. The staged 3MF is the case the feature exists for.
+  const richAvailable = await fetch('./fixtures/sliced.3mf', { method: 'HEAD' })
+    .then((r) => r.ok).catch(() => false);
+  if (richAvailable) {
+    const richKey = key + '-3mf';
+    localStorage.removeItem('model3d:file:' + richKey);
+    const richOptions = { source: './fixtures/sliced.3mf', language: 'en', remember: true, storageKey: richKey };
+
+    const richFirst = await new Promise((resolve) => {
+      const host = document.createElement('div');
+      host.style.width = '700px';
+      host.style.height = '480px';
+      box.append(host);
+      const panel = mount(host, {
+        ...richOptions,
+        onStatus: (s) => { if (s.kind === 'ready') setTimeout(() => resolve(panel), 150); },
+      });
+    });
+    check('richHasBed', richFirst.state.bed.available);
+    const richPalette = (richFirst.palette() ?? []).length;
+    check('richPaletteLen', richPalette);
+    richFirst.toggleBed();
+    richFirst.setFilament(0, '#00ff88');
+    richFirst.setFilament(1, '#ff0066');
+    richFirst.setLayers(0, 4, true);
+    richFirst.flushSave();
+    richFirst.dispose();
+
+    const richSecond = await new Promise((resolve) => {
+      const host = document.createElement('div');
+      host.style.width = '700px';
+      host.style.height = '480px';
+      box.append(host);
+      const panel = mount(host, {
+        ...richOptions,
+        onStatus: (s) => { if (s.kind === 'ready') setTimeout(() => resolve(panel), 150); },
+      });
+    });
+    check('richBedRemembered', richSecond.state.bed.visible);
+    check('richCubeRemembered', richSecond.navCube !== null);
+    check('richPalette0', richSecond.palette()[0]);
+    check('richPalette1', richSecond.palette()[1]);
+    check('richEnginePalette0', richSecond.viewer.paletteInfo()[0]);
+    check('richLayerRange', richSecond.state.layers === null ? 'none' : richSecond.state.layers.range.join('-'));
+    check('richDimBelow', richSecond.state.layers === null ? 'none' : richSecond.state.layers.dim);
+    richSecond.dispose();
+    localStorage.removeItem('model3d:file:' + richKey);
+  } else {
+    check('richSkipped', 'no fixture');
+  }
+
+  document.getElementById('log').textContent = results.join('\n');
+  document.title = 'PERSIST DONE ' + results.length;
+  window.__results = results;
+</script>
+</body>
+</html>

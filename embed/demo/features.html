@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>features</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0a0b0c; color: #d6d8db; font: 12px/1.5 ui-monospace, Menlo, monospace; }
+  #box { width: 900px; height: 560px; margin: 10px; border: 1px solid #222; }
+  #log { margin: 10px; color: #8a949c; white-space: pre; }
+</style>
+</head>
+<body>
+<div id="box"></div>
+<div id="log">starting</div>
+<script>
+  const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+  window.addEventListener('error', (e) => { log('ERROR ' + e.message + ' @' + e.lineno); document.title = 'ERR ' + e.message; });
+  window.addEventListener('unhandledrejection', (e) => {
+    const m = e.reason?.message ?? String(e.reason);
+    log('REJECT ' + m); document.title = 'REJ ' + m;
+  });
+</script>
+<script type="module">
+  import { mount } from '../dist/model3d-viewer.mjs';
+
+  const box = document.getElementById('box');
+  document.getElementById('log').textContent = 'module loaded';
+
+  // Each check drives the panel through its public API and records what the
+  // engine reports back. The result lands in the title so a headless run can
+  // read it from the dumped DOM -- console output is not visible there.
+  const results = [];
+  // Accept either a thunk (so a throwing read is attributed to its own check) or
+  // an already-evaluated value.
+  const check = (name, source) => {
+    try {
+      const value = typeof source === 'function' ? source() : source;
+      results.push(`${name}=${value}`);
+    } catch (error) {
+      results.push(`${name}=THREW(${error.message})`);
+    }
+  };
+
+  const panel = mount(box, {
+    source: './fixtures/sliced.3mf',
+    language: 'ru',
+    onStatus: (status) => {
+      log('status: ' + status.kind + (status.message ? ' ' + status.message : ''));
+      if (status.kind !== 'ready') { document.title = 'FAIL ' + (status.message ?? status.kind); return; }
+
+      // Settle a frame so the viewer has drawn at least once.
+      setTimeout(() => {
+        const viewer = panel.viewer;
+        check('view', panel.state.view);
+        check('layers', panel.state.layers ? panel.state.layers.count : 'none');
+        check('bedAvailable', panel.state.bed.available);
+        check('bedButtonHidden', panel.bedButton.hidden);
+        check('segmentedHidden', panel.segmented.hidden);
+        check('paletteLen', (panel.palette() ?? []).length);
+        check('layerSliderMounted', panel.layerSlider !== null);
+
+        // Toggle the bed: it should mount the navigation cube with it.
+        panel.toggleBed();
+        check('bedVisible', panel.state.bed.visible);
+        check('navCubeMounted', panel.navCube !== null);
+
+        // Move the layer cut.
+        if (panel.state.layers !== null) {
+          panel.setLayers(0, 5, panel.state.layers.dim);
+          check('cutRange', panel.state.layers.range.join('-'));
+        }
+        // One-layer switch.
+        panel.toggleOneLayer();
+        check('oneLayerOn', panel.state.oneLayer);
+        check('oneLayerRange', panel.state.layers.range.join('-'));
+
+        // Plain lighting is on by default, so the surface row is hidden.
+        check('surfaceRowHidden', panel.surfaceRow.hidden);
+        panel.togglePlainLighting();
+        check('plainOff', panel.state.plainLighting);
+        check('surfaceRowShown', !panel.surfaceRow.hidden);
+
+        // Per-filament surface, then the light level.
+        panel.selectSlot(1);
+        panel.setSurface(1, { matte: 0.2, metalness: 0.9 });
+        const surfaces = viewer.surfaceInfo().surfaces;
+        check('slot1Matte', surfaces[1].matte.toFixed(2));
+        check('slot1Metal', surfaces[1].metalness.toFixed(2));
+        panel.setLightLevel(1.4);
+        check('lightLevel', viewer.surfaceInfo().lightLevel.toFixed(2));
+
+        // Recolour a filament and read it back out of the engine.
+        panel.setFilament(0, '#00ff88');
+        check('recoloured', panel.palette()[0]);
+        check('enginePalette0', viewer.paletteInfo()[0]);
+
+        // Background.
+        panel.setBackground('#2b3138');
+        check('bg', viewer.backgroundInfo());
+        panel.setBackground(null);
+        check('bgAuto', String(viewer.backgroundInfo()));
+
+        // Camera.
+        panel.setOrbit(0, 1.2);
+        check('orbitTop', viewer.orientation().pitch.toFixed(2));
+        panel.reset();
+
+        // Export a PNG and report whether it has real content.
+        const url = viewer.renderToImage({ width: 512, background: '#1c1d20' });
+        check('exportLen', url === null ? 'null' : url.length);
+        // Switch views.
+        panel.setView('model');
+        check('modelView', panel.state.view);
+        check('modelTris', panel.state.mesh.triangles);
+        check('layerSliderGone', panel.layerSlider === null);
+        panel.setView('sliced');
+        check('backToSliced', panel.state.view);
+
+        document.title = 'DONE ' + results.length;
+        window.__results = results;
+        document.getElementById('log').textContent = results.join('\n');
+      }, 150);
+    },
+  });
+
+  window.__panel = panel;
+</script>
+</body>
+</html>

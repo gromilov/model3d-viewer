@@ -1,0 +1,30 @@
+<!doctype html><html><head><meta charset="utf-8"><title>export-visual</title>
+<style>body{margin:0;background:#0a0b0c}#box{width:700px;height:520px}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+const host = document.createElement('div');
+host.style.width = '700px'; host.style.height = '520px';
+document.getElementById('box').append(host);
+
+const panel = mount(host, {
+  source: './fixtures/sliced.3mf', language: 'ru', remember: false,
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); return; }
+    await new Promise((r) => setTimeout(r, 250));
+    // Exactly what the download button produces, with the same default backdrop.
+    const url = panel.viewer.renderToImage({ width: 2048, background: '#1c1d20' });
+    const image = new Image();
+    await new Promise((res) => { image.onload = res; image.src = url; });
+    // Draw the export into the page so a screenshot captures the artefact itself.
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width; canvas.height = image.height;
+    canvas.style.cssText = 'width:700px;height:auto;display:block';
+    canvas.getContext('2d').drawImage(image, 0, 0);
+    document.getElementById('box').replaceChildren(canvas);
+    log('exported ' + image.width + 'x' + image.height);
+    document.title = 'EXPORTVISUAL ' + image.width + 'x' + image.height;
+  },
+});
+</script></body></html>

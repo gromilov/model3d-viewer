@@ -1,0 +1,17 @@
+<!doctype html><html><head><meta charset="utf-8"><title>cube</title>
+<style>body{margin:0;background:#0a0b0c}#box{width:800px;height:600px}</style></head>
+<body><div id="box"></div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/sliced.3mf',
+  language: 'ru',
+  onStatus: (s) => {
+    if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); return; }
+    panel.toggleBed();
+    panel.togglePlainLighting();
+    setTimeout(() => { document.title = 'CUBE OK'; }, 150);
+  },
+});
+globalThis.__panel = panel;
+</script></body></html>

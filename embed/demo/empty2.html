@@ -1,0 +1,20 @@
+<!doctype html><html><body><div id="box" style="width:400px;height:300px"></div><div id="log"></div>
+<script type="module">
+import { mount } from '/embed/dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += s + ' || '; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+// The panel must refuse to trace an empty scene instead of uploading a degenerate
+// tree, and must say why.
+const panel = mount(document.getElementById('box'), {
+  source: () => Promise.resolve({ parsed: { mesh: { kind: 'segments', instances: new Float32Array(0), stride: 12, segments: 0, triangles: 0, ring: [], indices: [], layerZs: [], palette: [], size: [0,0,0], center: [0,0,0] } } }),
+  language: 'ru', remember: false,
+  onStatus: (s) => {
+    if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); return; }
+    setTimeout(() => {
+      panel.startTrace();
+      log('tracing=' + panel.state.tracing + ' error=' + panel.state.traceError);
+      document.title = 'EMPTY2 tracing=' + panel.state.tracing + ' err=' + (panel.state.traceError ?? 'none');
+    }, 200);
+  },
+});
+</script></body></html>

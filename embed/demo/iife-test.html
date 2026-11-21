@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8"><title>iife</title></head>
+<body><div id="log">start</div>
+<script src="../dist/model3d-viewer.js"></script>
+<script>
+const log = document.getElementById('log');
+try {
+  const g = globalThis.Model3DViewer;
+  log.textContent = 'global: ' + (g ? Object.keys(g).join(',') : 'MISSING');
+  const defined = customElements.get('model3d-viewer') !== undefined;
+  log.textContent += ' | element defined: ' + defined;
+  document.title = g && defined ? 'IIFE OK' : 'IIFE FAIL';
+} catch (e) { log.textContent = 'THROW ' + e.message; document.title = 'THROW'; }
+</script>
+</body></html>

@@ -1,0 +1,62 @@
+<!doctype html><html><head><meta charset="utf-8"><title>yield</title>
+<style>body{margin:0;background:#0a0b0c;color:#8a949c;font:11px monospace}
+#box{width:600px;height:480px}#log{padding:6px;white-space:pre}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const downloads = [];
+HTMLAnchorElement.prototype.click = function () { if (this.download) downloads.push(this.href); };
+
+// The export must not run as one task. A blocking loop hands the event loop nothing
+// until it is done, so a watcher polling the progress counter sees exactly one
+// value: the final one. A sliced export is observed climbing. This is the property
+// that matters and the only one a headless run can honestly assert -- whether a
+// frame was *painted* cannot be seen here, because there is no compositor.
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/sliced.3mf', language: 'ru', remember: false,
+  onStatus: (s) => {
+    if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); return; }
+    setTimeout(async () => {
+      panel.startTrace();
+      await sleep(1200);
+      const seen = [];
+      let last = 0;
+      let worst = 0;
+      const watch = setInterval(() => {
+        const now = Date.now();
+        const n = panel.state.traceExported;
+        if (seen.length === 0 || seen[seen.length - 1] !== n) seen.push(n);
+        if (last !== 0 && now - last > worst) worst = now - last;
+        last = now;
+      }, 5);
+      const t0 = Date.now();
+      panel.saveTracedImage();
+      while (downloads.length === 0 && Date.now() - t0 < 120000) await sleep(20);
+      clearInterval(watch);
+      const elapsed = Date.now() - t0;
+      const url = downloads[0] ?? '';
+      log('observations: ' + seen.length + ' (' + seen.slice(0, 8).join(',') + '…)');
+      log('elapsed: ' + elapsed + ' ms');
+      log('worst gap: ' + worst + ' ms (NOT asserted: see below)');
+      log('png chars: ' + url.length);
+      // Only the observation count is asserted. This page runs under Chrome's
+      // virtual time, which fast-forwards timers, so the wall-clock gap between
+      // them measures nothing here -- the harness run reports single-digit
+      // milliseconds for a stall that is hundreds in real time. The gap was
+      // measured separately, without virtual time, and it is what set the slice
+      // size; this check guards the property that virtual time cannot fake:
+      // a loop that blocks hands the event loop nothing, so it is observed once.
+      const yielded = seen.length >= 8;
+      const real = url.startsWith('data:image/png') && url.length > 50000;
+      if (!yielded) { document.title = 'FAIL not yielded, observations=' + seen.length; return; }
+      if (!real) { document.title = 'FAIL no png'; return; }
+      document.title = 'YIELD observations=' + seen.length + ' png=' + url.length;
+    }, 400);
+  },
+});
+</script></body></html>

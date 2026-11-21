@@ -1,0 +1,101 @@
+<!doctype html><html><head><meta charset="utf-8"><title>compare</title>
+<style>body{margin:0;background:#0a0b0c;color:#8a949c;font:11px monospace}
+.row{display:flex}#r,#t{width:440px;height:440px;display:block}#log{padding:6px}</style></head>
+<body>
+<div class="row"><canvas id="r"></canvas><canvas id="t"></canvas></div>
+<div id="log">start</div>
+<script type="module">
+import { parseModel, buildBvh, createTracer, createViewer } from '../dist/model3d-viewer.mjs';
+
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+
+const res = await fetch('./fixtures/sliced.3mf');
+const parsed = parseModel('x.3mf', new Uint8Array(await res.arrayBuffer()));
+
+const W = 440, H = 440;
+const WARM = 64;
+
+// --- Rasterised reference -------------------------------------------------
+const rasterCanvas = document.getElementById('r');
+rasterCanvas.width = W; rasterCanvas.height = H;
+const viewer = createViewer(rasterCanvas);
+viewer.setPlainLighting(false);
+// A close, low view so the upper part casts onto the plate below it.
+viewer.setOrbit(0.55, 0.30);
+viewer.setMesh(parsed.sliced ?? parsed.mesh);
+
+// --- Traced, from the same camera -----------------------------------------
+const scene = viewer.sceneState();
+const bvh = buildBvh(scene.mesh, { meshScale: scene.meshScale, meshCenter: scene.meshCenter });
+
+const traceCanvas = document.getElementById('t');
+traceCanvas.width = W; traceCanvas.height = H;
+const tracer = createTracer(traceCanvas);
+if (tracer === null) { document.title = 'NO TRACER'; }
+else if (!tracer.ensureTargets(W, H)) { document.title = 'NO TARGETS'; }
+
+const frame = {
+  eye: scene.eye, target: scene.target, up: scene.up,
+  tanHalfFov: scene.tanHalfFov,
+  palette: scene.palette, surfaces: scene.surfaces,
+  paletteCount: scene.paletteCount, lightLevel: scene.lightLevel,
+  plainLighting: false, lightRadius: 0.09,
+};
+// The tree has to be handed to the tracer before anything can be traced; without
+// this line every traceSample call returned early and the page quietly compared a
+// cleared canvas against a rendered one.
+tracer.setScene(bvh);
+
+const SAMPLES = 48;
+const t0 = performance.now();
+for (let i = 0; i < SAMPLES; i++) tracer.traceSample(frame);
+const traceMs = performance.now() - t0;
+tracer.resolveToScreen({ background: [0.11, 0.115, 0.126], opaque: true });
+log('traced ' + SAMPLES + ' spp in ' + Math.round(traceMs) + 'ms = ' + (traceMs / SAMPLES).toFixed(0) + 'ms/sample, samples=' + tracer.sampleCount() + ', size=' + JSON.stringify(tracer.size()));
+
+// --- Compare ---------------------------------------------------------------
+function pixels(canvas) {
+  const c = document.createElement('canvas');
+  c.width = canvas.width; c.height = canvas.height;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(canvas, 0, 0);
+  return ctx.getImageData(0, 0, c.width, c.height).data;
+}
+
+// Read a WebGL canvas straight out of its own context: drawImage on a canvas that
+// was never composited returns blank, which is why the traced panel looked empty
+// while the pixels were there.
+function glPixels(canvas) {
+  const gl = canvas.getContext('webgl2') ?? canvas.getContext('webgl');
+  const data = new Uint8Array(canvas.width * canvas.height * 4);
+  gl.readPixels(0, 0, canvas.width, canvas.height, gl.RGBA, gl.UNSIGNED_BYTE, data);
+  return data;
+}
+const rp = glPixels(rasterCanvas);
+const tp = glPixels(traceCanvas);
+
+// Where the traced image is notably darker than the rasterised one, the tracer
+// has found occlusion the rasteriser cannot represent. That difference *is* the
+// feature, so it is what to assert on.
+let darker = 0, lighter = 0, covered = 0;
+let sumRaster = 0, sumTraced = 0;
+for (let i = 0; i < rp.length; i += 4) {
+  const lr = 0.2126 * rp[i] + 0.7152 * rp[i+1] + 0.0722 * rp[i+2];
+  const lt = 0.2126 * tp[i] + 0.7152 * tp[i+1] + 0.0722 * tp[i+2];
+  // Only where the rasteriser saw a surface: the background is not a surface.
+  if (lr < 8) continue;
+  covered++;
+  sumRaster += lr; sumTraced += lt;
+  if (lt < lr * 0.75) darker++;
+  if (lt > lr * 1.25) lighter++;
+}
+const pctDarker = (darker / covered * 100).toFixed(1);
+const pctLighter = (lighter / covered * 100).toFixed(1);
+log('surface pixels: ' + covered);
+log('darker in trace: ' + pctDarker + '% | lighter: ' + pctLighter + '%');
+log('mean luma raster=' + (sumRaster/covered).toFixed(1) + ' traced=' + (sumTraced/covered).toFixed(1));
+document.title = 'CMP darker=' + pctDarker + ' lighter=' + pctLighter + ' ms=' + Math.round(traceMs / SAMPLES);
+globalThis.__compare = { pctDarker, pctLighter, covered, traceMs, SAMPLES };
+</script></body></html>

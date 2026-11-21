@@ -1,0 +1,72 @@
+<!doctype html><html><head><meta charset="utf-8"><title>export</title>
+<style>body{margin:0;background:#0a0b0c}#box{width:600px;height:400px}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+const results = [];
+const check = (name, source) => {
+  try { results.push(`${name}=${typeof source === 'function' ? source() : source}`); }
+  catch (e) { results.push(`${name}=THREW(${e.message})`); }
+};
+
+// Read the corner pixel of an exported data URL. The corner is background by
+// construction -- the camera frames the model centrally -- so it says exactly what
+// colour the export cleared to, which is the thing that was wrong.
+async function cornerColour(dataUrl) {
+  const image = new Image();
+  await new Promise((resolve, reject) => {
+    image.onload = resolve;
+    image.onerror = () => reject(new Error('decode failed'));
+    image.src = dataUrl;
+  });
+  const canvas = document.createElement('canvas');
+  canvas.width = image.width;
+  canvas.height = image.height;
+  const context = canvas.getContext('2d');
+  context.drawImage(image, 0, 0);
+  const { data } = context.getImageData(0, 0, 1, 1);
+  return [data[0], data[1], data[2], data[3]];
+}
+
+const host = document.createElement('div');
+host.style.width = '600px';
+host.style.height = '400px';
+document.getElementById('box').append(host);
+
+const panel = mount(host, {
+  source: './fixtures/sliced.3mf', language: 'en', remember: false,
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); return; }
+    await new Promise((r) => setTimeout(r, 200));
+
+    // The default export backdrop is the theme's graphite, and that is what the
+    // user reported coming out green.
+    panel.saveImage = () => {};  // do not trigger a download
+    const graphite = panel.viewer.renderToImage({ width: 600, background: '#1c1d20' });
+    const corner = await cornerColour(graphite);
+    check('graphiteRGBA', corner.join(','));
+    // #1c1d20 is (28, 29, 32).
+    check('graphiteExact', corner[0] === 28 && corner[1] === 29 && corner[2] === 32 && corner[3] === 255);
+
+    // A colour that is obviously not green, and a white one.
+    const red = await cornerColour(panel.viewer.renderToImage({ width: 600, background: '#cc2222' }));
+    check('redRGBA', red.join(','));
+    check('redExact', red[0] === 204 && red[1] === 34 && red[2] === 34);
+
+    const white = await cornerColour(panel.viewer.renderToImage({ width: 600, background: '#ffffff' }));
+    check('whiteExact', white[0] === 255 && white[1] === 255 && white[2] === 255);
+
+    // A triple must work as well as a string.
+    const triple = await cornerColour(panel.viewer.renderToImage({ width: 600, background: [0.1, 0.2, 0.3] }));
+    check('tripleRGBA', triple.join(','));
+
+    // No more green anywhere: the reported bug was a *pure* green, so pin that.
+    check('notGreen', !(corner[0] < 8 && corner[1] > 200 && corner[2] < 8));
+
+    document.getElementById('log').textContent = results.join('\n');
+    document.title = 'EXPORT DONE ' + results.filter((r) => r.includes('=true')).length;
+  },
+});
+</script></body></html>

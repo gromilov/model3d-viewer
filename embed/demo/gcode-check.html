@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><title>gcode</title>
+<style>#box{width:700px;height:520px}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = document.getElementById('log');
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/plate-small.gcode',
+  language: 'ru',
+  onStatus: (s) => {
+    if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); return; }
+    const info = panel.viewer.layerInfo();
+    const bed = panel.viewer.bedInfo();
+    log.textContent = `tris=${s.mesh.triangles} layers=${info.count} bed=${bed.available} view=${panel.state.view}`;
+    setTimeout(() => { document.title = 'GCODE OK layers=' + info.count; }, 150);
+  },
+});
+</script></body></html>

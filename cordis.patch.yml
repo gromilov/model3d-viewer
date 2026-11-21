@@ -1,0 +1,5 @@
+# Bundle patch: insert the model viewer row. The Host half is inert; the Client
+# module registers the right-sidebar tab type and its body.
+- insert:
+    - id: model3d-viewer
+      name: 'model3d-viewer'

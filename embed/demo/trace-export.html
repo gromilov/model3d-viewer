@@ -1,0 +1,59 @@
+<!doctype html><html><head><meta charset="utf-8"><title>traceexport</title>
+<style>body{margin:0;background:#0a0b0c;color:#8a949c;font:11px monospace}
+#box{width:600px;height:480px}#log{padding:6px;white-space:pre}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+
+// Capture the download rather than writing a file: a headless run has nowhere to put
+// one, and the data URL is what matters.
+const downloads = [];
+HTMLAnchorElement.prototype.click = function () {
+  if (this.download) downloads.push({ name: this.download, href: this.href });
+};
+
+const box = document.getElementById('box');
+const panel = mount(box, {
+  source: './fixtures/sliced.3mf', language: 'ru', remember: false,
+  onStatus: (s) => {
+    if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind); return; }
+    panel.viewer.setOrbit(0.9, 0.62);
+    setTimeout(() => {
+      panel.startTrace();
+      setTimeout(() => {
+        panel.saveTracedImage();
+        let waited = 0;
+        const poll = setInterval(() => {
+          waited += 100;
+          if (downloads.length === 0 && waited < 60000) return;
+          clearInterval(poll);
+          if (downloads.length === 0) { document.title = 'NO DOWNLOAD'; return; }
+          const d = downloads[0];
+          log('file: ' + d.name + ', ' + d.href.length + ' chars');
+          log('is png: ' + d.href.startsWith('data:image/png'));
+          const img = new Image();
+          img.onload = () => {
+            const c = document.createElement('canvas');
+            c.width = img.width; c.height = img.height;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const px = ctx.getImageData(0, 0, c.width, c.height).data;
+            let lit = 0;
+            for (let i = 0; i < px.length; i += 4) {
+              if (0.2126*px[i] + 0.7152*px[i+1] + 0.0722*px[i+2] > 40) lit++;
+            }
+            log('size: ' + img.width + 'x' + img.height + ', lit ' + lit + ' of ' + (c.width*c.height));
+            document.title = 'TRACEEXPORT ' + img.width + 'x' + img.height + ' lit=' + lit;
+          };
+          img.onerror = () => { document.title = 'DECODE FAILED'; };
+          img.src = d.href;
+        }, 100);
+      }, 400);
+    }, 400);
+  },
+});
+globalThis.__panel = panel;
+</script></body></html>

@@ -1,0 +1,23 @@
+<!doctype html><html><head><meta charset="utf-8"><title>panellook</title>
+<style>html,body{margin:0;background:#0a0b0c;color:#8a949c;font:12px/1.4 -apple-system,sans-serif}
+#box{width:100%;height:100vh}</style></head>
+<body><div id="box"></div>
+<script type="module">
+import { mount } from '/embed/dist/model3d-viewer.mjs';
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const panel = mount(document.getElementById('box'), {
+  source: '/embed/demo/fixtures/large.gcode', language: 'ru', remember: false, showName: true,
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { if (s.kind === 'failed') document.title = 'FAIL ' + (s.message ?? ''); return; }
+    await sleep(400);
+    window.__panel = panel;
+    // Material mode shows the per-filament rows, which is the busier state.
+    if (new URLSearchParams(location.search).get('material') === '1') {
+      panel.togglePlainLighting();
+      await sleep(300);
+    }
+    document.title = 'PANELLOOK ready';
+  },
+});
+</script></body></html>

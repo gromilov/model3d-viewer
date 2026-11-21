@@ -1,0 +1,67 @@
+<!doctype html><html><head><meta charset="utf-8"><title>panelcheck</title>
+<style>html,body{margin:0;background:#0a0b0c;color:#8a949c;font:11px monospace}
+#box{width:400px;height:520px}#log{padding:6px;white-space:pre}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Four things that were broken in the panel and looked, at a glance, like a
+// deliberate minimal design. Each is asserted here because none of them threw.
+//   1. the tracing buttons had no icon -- `icon()` returned null for a missing
+//      path, and a button with no glyph is an invisible button;
+//   2. the slider value labels were empty, because applySettings returned early
+//      when nothing was stored and skipped the sync;
+//   3. the sliders edited defaults instead of the scene, because the panel's copy
+//      of the filament materials was never filled from the viewer;
+//   4. the reset button was permanently disabled, because the loading flag was
+//      set and never cleared.
+const failures = [];
+const check = (ok, what) => { log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) failures.push(what); };
+
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/large.gcode', language: 'ru', remember: false, showName: true,
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { if (s.kind === 'failed') document.title = 'FAIL ' + (s.message ?? ''); return; }
+    await sleep(400);
+
+    // 1. every visible button carries a glyph
+    const buttons = [...document.querySelectorAll('.m3d-toolbar .m3d-btn')];
+    const bare = buttons.filter((b) => b.querySelector('svg') === null);
+    check(buttons.length >= 7, buttons.length + ' toolbar buttons');
+    check(bare.length === 0, bare.length === 0 ? 'every button has an icon'
+      : 'buttons without an icon: ' + bare.map((b) => b.title).join(', '));
+
+    // 2. material mode shows four labelled sliders, each with a number
+    panel.togglePlainLighting();
+    await sleep(250);
+    const sliders = [...document.querySelectorAll('.m3d-surface-row .m3d-slider')];
+    check(sliders.length === 4, 'four surface sliders, got ' + sliders.length);
+    const blank = sliders.filter((s) => (s.querySelector('.m3d-slider-value')?.textContent ?? '') === '');
+    check(blank.length === 0, blank.length === 0 ? 'every slider shows its value'
+      : 'sliders with no value: ' + blank.length);
+
+    // 3. the panel knows the scene's materials, not an empty array
+    check(Array.isArray(panel.state.surfaces) && panel.state.surfaces.length > 0,
+      'panel state carries ' + (panel.state.surfaces?.length ?? 0) + ' filament surface(s)');
+    const shown = Number(sliders[0]?.querySelector('.m3d-slider-value')?.textContent);
+    const actual = Math.round((panel.state.surfaces[0]?.matte ?? 0) * 100);
+    check(shown === actual, 'matte slider shows ' + shown + ', scene says ' + actual);
+
+    // 4. the reset button is usable once the file is ready
+    check(panel.resetButton.disabled === false, 'reset button is enabled after loading');
+    check(panel.loading === false, 'loading flag cleared');
+
+    // 5. at this width the row wraps rather than hiding a slider off the edge
+    const row = document.querySelector('.m3d-surface-row');
+    const clipped = sliders.filter((s) => s.getBoundingClientRect().right > row.getBoundingClientRect().right + 1);
+    check(clipped.length === 0, clipped.length === 0 ? 'no slider is clipped off the row'
+      : clipped.length + ' slider(s) past the right edge');
+
+    document.title = failures.length === 0 ? 'PANELCHECK ok' : 'FAIL ' + failures.join('; ');
+  },
+});
+</script></body></html>

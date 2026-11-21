@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# Editor and tooling scratch
+*.bak
+*.tmp
+node_modules/
+
+# The demo's richer fixtures (a painted 3MF, a sliced G-code) are copies of the
+# user's print files, staged by `verify/fixtures.mjs` rather than committed. The
+# demo falls back to the two bundled STLs when they are absent.
+embed/demo/fixtures/

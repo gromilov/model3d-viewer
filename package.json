@@ -1,0 +1,64 @@
+{
+  "name": "model3d-viewer",
+  "version": "0.1.0",
+  "description": "3D model viewer for STL, 3MF and sliced G-code: an embeddable WebGL library with a DSH sidebar tab",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gromilov/model3d-viewer.git"
+  },
+  "homepage": "https://github.com/gromilov/model3d-viewer#readme",
+  "keywords": [
+    "3d",
+    "viewer",
+    "stl",
+    "3mf",
+    "gcode",
+    "webgl",
+    "ray-tracing",
+    "3d-printing"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./embed": "./embed/dist/model3d-viewer.mjs",
+    "./embed/script": "./embed/dist/model3d-viewer.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "build.mjs",
+    "embed/build.mjs",
+    "embed/src/*.js",
+    "embed/dist/*",
+    "locale/*.json",
+    "icon.svg",
+    "cordis.patch.yml",
+    "README.md",
+    "embed/README.md"
+  ],
+  "scripts": {
+    "build": "node embed/build.mjs && node build.mjs",
+    "build:embed": "node embed/build.mjs",
+    "build:plugin": "node build.mjs",
+    "check": "node --check embed/dist/model3d-viewer.js && node --check client.js",
+    "verify": "node verify/library.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-api-workspace-files",
+        "@deepseek-ai/dsh-client-ui-sidebar-right",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  }
+}

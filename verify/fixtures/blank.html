@@ -1,0 +1,14 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>POC OK tris=4420 | rendered</title>
+<style>body{margin:0;background:#111;color:#eee;font:12px monospace}#log{padding:8px}</style></head><body>
+<div id="log">fetched 849076 bytes | mesh tris=4420 sliced=yes | rendered</div>
+<canvas id="c" width="620" height="460" style="display:block"></canvas>
+<script>
+// Negative control that lies: it publishes exactly the reference page's success
+// markers, but clears the canvas to the background colour and draws nothing.
+// DOM checks cannot catch this; only the pixel checks can. That is the whole
+// reason both kinds exist.
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+if (gl) { gl.clearColor(0.067, 0.067, 0.067, 1); gl.clear(gl.COLOR_BUFFER_BIT); }
+</script></body></html>

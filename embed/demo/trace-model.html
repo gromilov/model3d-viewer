@@ -1,0 +1,60 @@
+<!doctype html><html><head><meta charset="utf-8"><title>tracemodel</title>
+<style>body{margin:0;background:#0a0b0c;color:#8a949c;font:11px monospace}
+.row{display:flex}#r,#t{width:420px;height:420px;display:block}#log{padding:6px}</style></head>
+<body>
+<div class="row"><canvas id="r"></canvas><canvas id="t"></canvas></div>
+<div id="log">start</div>
+<script type="module">
+import { parseModel, buildBvh, createTracer, createViewer } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+
+const res = await fetch('./fixtures/sliced.3mf');
+const parsed = parseModel('x.3mf', new Uint8Array(await res.arrayBuffer()));
+
+const W = 420, H = 420;
+// A view from above and to the side, close in: the raised part should throw a
+// shadow onto the plate, which the rasteriser cannot draw at all.
+const raster = document.getElementById('r');
+raster.width = W; raster.height = H;
+const viewer = createViewer(raster);
+viewer.setPlainLighting(false);
+viewer.setOrbit(0.9, 0.62);
+viewer.setMesh(parsed.sliced ?? parsed.mesh);
+
+const scene = viewer.sceneState();
+const bvh = buildBvh(scene.mesh, { meshScale: scene.meshScale, meshCenter: scene.meshCenter });
+
+const canvas = document.getElementById('t');
+canvas.width = W; canvas.height = H;
+const tracer = createTracer(canvas);
+tracer.ensureTargets(W, H);
+tracer.setScene(bvh);
+
+const frame = {
+  eye: scene.eye, target: scene.target, up: scene.up, tanHalfFov: scene.tanHalfFov,
+  palette: scene.palette, surfaces: scene.surfaces,
+  paletteCount: scene.paletteCount, lightLevel: 1, plainLighting: false, lightRadius: 0.08,
+};
+const SAMPLES = 64;
+for (let i = 0; i < SAMPLES; i++) tracer.traceSample(frame);
+tracer.resolveToScreen({ background: scene.background ?? [0.11,0.115,0.126], opaque: true });
+
+function glPixels(c) {
+  const gl = c.getContext('webgl2') ?? c.getContext('webgl');
+  const d = new Uint8Array(c.width * c.height * 4);
+  gl.readPixels(0, 0, c.width, c.height, gl.RGBA, gl.UNSIGNED_BYTE, d);
+  return d;
+}
+const rp = glPixels(raster), tp = glPixels(canvas);
+let darker = 0, covered = 0, sumR = 0, sumT = 0;
+for (let i = 0; i < rp.length; i += 4) {
+  const lr = 0.2126*rp[i]+0.7152*rp[i+1]+0.0722*rp[i+2];
+  const lt = 0.2126*tp[i]+0.7152*tp[i+1]+0.0722*tp[i+2];
+  if (lr < 8) continue;
+  covered++; sumR += lr; sumT += lt;
+  if (lt < lr * 0.7) darker++;
+}
+log('covered=' + covered + ' darker=' + (darker/covered*100).toFixed(1) + '% meanR=' + (sumR/covered).toFixed(1) + ' meanT=' + (sumT/covered).toFixed(1));
+document.title = 'TRACEMODEL dark=' + (darker/covered*100).toFixed(1) + ' r=' + (sumR/covered).toFixed(0) + ' t=' + (sumT/covered).toFixed(0);
+</script></body></html>

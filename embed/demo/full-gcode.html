@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><title>full</title>
+<style>body{margin:0;background:#0a0b0c}#box{width:900px;height:620px}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '/embed/dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+const t0 = performance.now();
+const const_ = document.createElement('div');
+document.getElementById('box').append(const_);
+const panel = mount(const_, {
+  source: '/embed/demo/fixtures/large.gcode',
+  language: 'ru',
+  remember: false,
+  onStatus: (s) => {
+    const ms = Math.round(performance.now() - t0);
+    if (s.kind !== 'ready') { document.title = 'FAIL ' + (s.message ?? s.kind) + ' after ' + ms + 'ms'; return; }
+    log('ready in ' + ms + 'ms tris=' + s.mesh.triangles);
+    setTimeout(() => {
+      const info = panel.viewer.layerInfo();
+      const bed = panel.viewer.bedInfo();
+      log('layers=' + info.count + ' bed=' + bed.available + ' view=' + panel.state.view);
+      document.title = 'FULL OK ' + s.mesh.triangles + ' tris ' + ms + 'ms';
+    }, 300);
+  },
+});
+globalThis.__panel = panel;
+</script></body></html>

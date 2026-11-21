@@ -1,0 +1,118 @@
+<!doctype html><html><head><meta charset="utf-8"><title>dsh-harness</title>
+<style>#box{width:800px;height:560px}</style></head>
+<body><div id="log">start</div><div id="box"></div>
+<script>
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { log('ERR ' + e.message + ' @' + e.lineno); document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { const m = e.reason?.message ?? String(e.reason); log('REJ ' + m); document.title = 'REJ ' + m; });
+
+// A minimal stand-in for the DSH browser module loader and the React copy it
+// hands out. Building the bundle is not the same as running it, and the whole
+// point of this exercise is that the bundle really mounts a viewer.
+const registered = {};
+window.__ModuleLoader__ = { load({ id, factory }) { registered[id] = factory; } };
+
+// React just real enough for one component with a ref and an effect.
+const refs = []; let refIndex = 0;
+window.__react = {
+  createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
+  useRef(initial) { const i = refIndex++; refs[i] ??= { current: initial }; return refs[i]; },
+  useEffect(fn) { (window.__effects ??= []).push(fn); },
+};
+</script>
+<script>
+// The bundle requires 'react'; serve our stand-in from the factory's require.
+window.addEventListener('load', () => {
+  if (globalThis.__parseModel === undefined) { log('PARSER MODULE NOT LOADED'); document.title = 'NO PARSER'; return; }
+  const factory = registered['model3d-viewer'];
+  if (!factory) { log('FACTORY NOT REGISTERED'); document.title = 'NO FACTORY'; return; }
+  log('factory registered');
+  const plugin = factory((name) => {
+    if (name === 'react') return window.__react;
+    throw new Error('unexpected require: ' + name);
+  });
+  log('plugin object keys: ' + Object.keys(plugin).join(','));
+  log('inject: ' + JSON.stringify(plugin.inject));
+
+  // Fake a context with the pieces the plugin uses.
+  const effects = [];
+  const registeredSlots = [];
+  const ctx = {
+    locale: { bind: (ns) => (key, params) => `${ns}:${key}`, register: (ns, dict) => { log('locale.register ' + ns + ' langs=' + Object.keys(dict).join('/')); return () => {}; } },
+    sidebarRightTabs: { register: (def) => { log('tab.register id=' + def.id + ' kind=' + def.kind + ' multiple=' + def.multiple); return () => {}; } },
+    slots: {
+      inject: (slot, fn) => { log('slots.inject ' + slot); return fn(); },
+      register: (def, component) => { registeredSlots.push({ slot: def.name, key: def.key, component }); log('slot.register ' + def.name + ' key=' + def.key); return () => {}; },
+    },
+    remote: { workspaceFiles: { readBytes: async () => ({ ok: false, error: { message: 'stub' } }) } },
+    effect: (fn) => { effects.push(fn); const d = fn(); return d; },
+  };
+
+  plugin.apply(ctx);
+  log('effects run: ' + effects.length + ', slots registered: ' + registeredSlots.length);
+
+  // Render the tab body the way the host would, then run its effect against a
+  // real DOM node, and see whether a panel appears.
+  const body = registeredSlots.find((s) => s.slot === 'sidebar.right.pane.tab');
+  if (!body) { log('NO BODY SLOT'); document.title = 'NO BODY'; return; }
+  const injected = { readModel: async (file, signal) => {
+    const res = await fetch('./fixtures/sliced.3mf');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    log('reader fetched ' + bytes.length + ' bytes');
+    // Parse exactly as the plugin's own reader does, so the panel is handed what
+    // the real host would hand it.
+    const parsed = globalThis.__parseModel('part.3mf', bytes);
+    log('parsed tris=' + parsed.mesh.triangles + ' sliced=' + (parsed.sliced ? 'yes' : 'no'));
+    return parsed.sliced !== undefined ? parsed : { mesh: parsed };
+  }, locales: { en: {}, ru: {} } };
+  const element = body.component({
+    useTabInfo: () => ({ tab: { contentId: 'dsh-resource://file/session/sess/fixtures/sliced.3mf' } }),
+    t: (k, p) => k,
+    ...injected,
+  });
+  log('component renders ' + element.type);
+  // Mount it, then run the effects, which is the order React uses.
+  const host = document.getElementById('box');
+  const domNode = document.createElement(element.type);
+  for (const [k, v] of Object.entries(element.props)) if (k !== 'children' && k !== 'ref') { try { domNode.setAttribute(k, v); } catch {} }
+  host.append(domNode);
+  refs[0].current = domNode;
+  for (const fn of (window.__effects ?? [])) { const c = fn(); if (typeof c === 'function') (window.__cleanups ??= []).push(c); }
+  log('effects ran; children in host: ' + host.querySelectorAll('*').length);
+  // A panel writes nothing until something changes -- saving the defaults on load
+  // would be noise in storage for every file ever opened. So the adapter's derived
+  // key is checked the way a user produces one: by clicking a toolbar button and
+  // seeing whether a per-file entry appears under the address the tab named.
+  setTimeout(() => {
+    const buttons = [...host.querySelectorAll('button')];
+    log('toolbar buttons: ' + buttons.length);
+    // The lighting toggle is the second button in the strip and is safe to press:
+    // it changes state without needing a bed or a palette.
+    const lighting = buttons.find((b) => (b.getAttribute('aria-pressed') ?? '') !== '');
+    (lighting ?? buttons[1])?.click();
+
+    setTimeout(() => {
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i += 1) keys.push(localStorage.key(i));
+      log('storage keys: ' + (keys.length === 0 ? '(none)' : keys.join(',')));
+      const ours = keys.filter((k) => k.startsWith('model3d:file:'));
+      log('adapter key: ' + (ours[0] ?? '(none)'));
+      // The key must name the tab's file, not a placeholder.
+      const derived = ours.some((k) => k.includes('sliced.3mf'));
+      document.title = derived ? 'DSH MOUNT OK' : 'DSH NO KEY';
+    }, 900);
+  }, 700);
+});
+</script>
+<script type="module">
+  // Exposed for the classic-script harness below: the same parser the bundle has.
+  import { parseModel } from '../dist/model3d-viewer.mjs';
+  globalThis.__parseModel = parseModel;
+  globalThis.__ready = true;
+</script>
+<script>
+  // The module above runs before this classic script is even fetched, but the
+  // load handler below is what reads the flag.
+</script>
+<script src="../../client.js"></script>
+</body></html>

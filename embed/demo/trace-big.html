@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset="utf-8"><title>tracebig</title>
+<style>body{margin:0;background:#0a0b0c}#t{width:640px;height:480px;display:block}</style></head>
+<body><canvas id="t"></canvas><div id="log"></div>
+<script type="module">
+import { parseModel, buildBvh, createTracer, createViewer } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += s + ' || '; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+const res = await fetch('./fixtures/large.gcode');
+const parsed = parseModel('p.gcode', new Uint8Array(await res.arrayBuffer()));
+log('strokes=' + parsed.instances.length / parsed.stride);
+
+const W = 640, H = 480;
+// Rasterise to get a camera, on a throwaway canvas.
+const off = document.createElement('canvas');
+off.width = W; off.height = H;
+const viewer = createViewer(off);
+viewer.setOrbit(0.9, 0.75);
+viewer.setMesh(parsed);
+const scene = viewer.sceneState();
+
+const t0 = performance.now();
+const bvh = buildBvh(scene.mesh, { meshScale: scene.meshScale, meshCenter: scene.meshCenter });
+const buildMs = performance.now() - t0;
+log('bvh ' + bvh.primCount + ' prims in ' + Math.round(buildMs) + 'ms');
+
+const canvas = document.getElementById('t');
+canvas.width = W; canvas.height = H;
+const tracer = createTracer(canvas);
+tracer.ensureTargets(W, H);
+tracer.setScene(bvh);
+const frame = {
+  eye: scene.eye, target: scene.target, up: scene.up, tanHalfFov: scene.tanHalfFov,
+  palette: scene.palette, surfaces: scene.surfaces,
+  paletteCount: scene.paletteCount, lightLevel: 1, plainLighting: false, lightRadius: 0.08,
+};
+const SAMPLES = Number(new URLSearchParams(location.search).get('frames') ?? 16);
+const gl = canvas.getContext('webgl2');
+const syncPixel = new Uint8Array(4);
+const t1 = performance.now();
+for (let i = 0; i < SAMPLES; i++) {
+  tracer.traceSample(frame);
+  // Force completion before the next sample, or the driver may batch the whole run
+  // and the timing measures submission rather than work.
+  gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, syncPixel);
+}
+tracer.resolveToScreen({ background: [0.11,0.115,0.126], opaque: true });
+const traceMs = performance.now() - t1;
+log(SAMPLES + ' samples in ' + Math.round(traceMs) + 'ms = ' + (traceMs/SAMPLES).toFixed(0) + 'ms/frame');
+document.title = 'TRACEBIG ok ' + Math.round(buildMs) + 'ms build ' + Math.round(traceMs/SAMPLES) + 'ms/frame';
+</script></body></html>
