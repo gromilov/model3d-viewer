@@ -14,9 +14,9 @@
 
 const CSS = `
 [data-model3d-viewer] {
-  --m3d-accent: #4cc4dd;
-  --m3d-accent-soft: rgba(76, 196, 221, 0.12);
-  --m3d-accent-line: rgba(76, 196, 221, 0.38);
+  --m3d-accent: #118980;
+  --m3d-accent-soft: rgba(17, 137, 128, 0.16);
+  --m3d-accent-line: rgba(17, 137, 128, 0.45);
   --m3d-surface: rgba(24, 25, 27, 0.78);
   --m3d-surface-solid: #1c1d20;
   --m3d-hairline: rgba(255, 255, 255, 0.10);
@@ -318,12 +318,12 @@ const CSS = `
   position: absolute;
   top: 12px;
   bottom: 12px;
-  right: 10px;
-  width: 26px;
+  right: 8px;
+  width: 30px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   pointer-events: auto;
 }
 [data-model3d-viewer] .m3d-layer-value {
@@ -335,49 +335,113 @@ const CSS = `
   white-space: nowrap;
 }
 [data-model3d-viewer] .m3d-layers.is-one .m3d-layer-value { color: var(--m3d-accent); }
+
+/* The track is the whole vertical strip, so it can be grabbed anywhere; the
+   groove inside it is what is actually drawn. Separating the two means the hit
+   area is wider than the thing it looks like, which is what a thin control
+   needs to be usable at all. */
 [data-model3d-viewer] .m3d-layer-track {
   position: relative;
   flex: 1 1 auto;
-  width: 2px;
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 1px;
+  width: 100%;
   cursor: pointer;
   touch-action: none;
+  display: flex;
+  justify-content: center;
 }
-/* A muted fill, not a neon bar: the band shows what is in view, and a glowing
-   column beside the print competes with it. */
-[data-model3d-viewer] .m3d-layer-band {
+
+/* An inset channel: a dark well with a hairline inside it, the way a physical
+   slot reads. OrcaSlicer's slider is a groove rather than a line, and a line on
+   its own looked like a scrollbar beside the print. */
+[data-model3d-viewer] .m3d-layer-groove {
   position: absolute;
-  left: -1px;
-  width: 4px;
-  background: rgba(255, 255, 255, 0.22);
-  border-radius: 2px;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 11px;
+  border-radius: 6px;
+  /* Only a little darker than the surface behind it: measured from the reference,
+     OrcaSlicer's well sits at about 76% of the backdrop's luminance, not at black.
+     A deep black channel read as a hole cut in the panel. */
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px 2px rgba(0, 0, 0, 0.28);
   pointer-events: none;
 }
+
+/* The visible range, filled solid in the accent colour as OrcaSlicer does. The
+   earlier version was a muted grey bar, which said "this region exists" but not
+   "these are the layers you are looking at". */
+[data-model3d-viewer] .m3d-layer-band {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 11px;
+  border-radius: 6px;
+  /* Flat, not a gradient: measured across the reference's band, the colour is the
+     same 17,137,128 from end to end. A gradient here was decoration that made the
+     control look lit from one side. */
+  background: var(--m3d-accent);
+  pointer-events: none;
+}
+
+/* One knob shape for both ends: a filled disc with a cross, sized by its border
+   rather than by a background so the groove shows through the ring. */
 [data-model3d-viewer] .m3d-layer-handle {
   position: absolute;
   left: 50%;
-  transform: translate(-50%, 50%);
+  width: 20px;
+  height: 20px;
+  margin-left: -10px;
+  /* Centred on its own value: the knob is placed by its bottom offset, so half of it
+     has to hang below that line or the top of the knob, not its middle, marks the
+     layer. */
+  margin-bottom: -10px;
   border-radius: 50%;
   cursor: grab;
   touch-action: none;
   box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  transition: transform 90ms ease-out, box-shadow 120ms;
 }
+[data-model3d-viewer] .m3d-layer-handle:active { cursor: grabbing; transform: scale(1.08); }
+
 [data-model3d-viewer] .m3d-layer-handle.is-top {
-  width: 10px;
-  height: 10px;
-  border: 1px solid var(--m3d-accent);
   background: var(--m3d-accent);
+  box-shadow:
+    0 0 0 2px var(--m3d-surface-solid),
+    0 1px 3px rgba(0, 0, 0, 0.5);
 }
 [data-model3d-viewer] .m3d-layer-handle.is-bottom {
-  width: 7px;
-  height: 7px;
-  border: 1px solid var(--m3d-hairline-strong);
   background: var(--m3d-surface-solid);
+  box-shadow:
+    inset 0 0 0 2px var(--m3d-accent),
+    0 0 0 2px var(--m3d-surface-solid),
+    0 1px 3px rgba(0, 0, 0, 0.5);
 }
+/* A ring rather than a disc for the lower bound, so the two are told apart at a
+   glance while both stay the accent colour -- the same idea as OrcaSlicer's
+   filled and outlined knobs. */
+
+[data-model3d-viewer] .m3d-layer-cross {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: var(--m3d-surface-solid);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+[data-model3d-viewer] .m3d-layer-handle.is-bottom .m3d-layer-cross {
+  stroke: var(--m3d-accent);
+}
+
 [data-model3d-viewer] .m3d-layer-handle:focus-visible {
   outline: 1px solid var(--m3d-accent-line);
-  outline-offset: 1px;
+  outline-offset: 3px;
 }
 /* The lower handle is not a separate control while the plate is cut to one
    layer, so it is drawn out of the way rather than removed: removing it would
@@ -386,6 +450,7 @@ const CSS = `
   pointer-events: none;
   opacity: 0;
 }
+
 [data-model3d-viewer] .m3d-one-layer {
   appearance: none;
   flex: 0 0 auto;

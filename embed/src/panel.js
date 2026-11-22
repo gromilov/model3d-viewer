@@ -449,7 +449,7 @@ export class ViewerPanel {
     this.segmented.hidden = true;
     this.segmentedButtons = {
       model: this.button({ icon: 'model', label: t('controls.model'), onClick: () => this.setView('model'), segment: true }),
-      sliced: this.button({ icon: 'sliced', label: t('controls.sliced'), onClick: () => this.setView('sliced'), segment: true }),
+      sliced: this.button({ icon: 'layers', label: t('controls.sliced'), onClick: () => this.setView('sliced'), segment: true }),
     };
     this.segmented.append(this.segmentedButtons.model, this.segmentedButtons.sliced);
 
@@ -1655,6 +1655,10 @@ class LayerSliderControl {
     this.dragging = null;
 
     this.valueNode = el('div', { class: 'm3d-layer-value' });
+    // The groove is a real box, not a hairline: OrcaSlicer's layer slider is an
+    // inset channel with the visible range filled solid, and that is what makes it
+    // read as a control rather than as a scrollbar thumb.
+    this.groove = el('div', { class: 'm3d-layer-groove' });
     this.band = el('div', { class: 'm3d-layer-band' });
     this.topHandle = this.makeHandle('top');
     this.bottomHandle = this.makeHandle('bottom');
@@ -1668,7 +1672,7 @@ class LayerSliderControl {
         this.onChange(this.range[0], this.range[1], !this.dim);
       },
       onWheel: (event) => this.onWheel(event),
-    }, [this.band, this.bottomHandle, this.topHandle]);
+    }, [this.groove, this.band, this.bottomHandle, this.topHandle]);
 
     this.oneLayerButton = el('button', {
       type: 'button',
@@ -1713,6 +1717,19 @@ class LayerSliderControl {
       },
       onKeyDown: (event) => this.onHandleKey(kind, event),
     });
+    // A plus inside the knob, as OrcaSlicer draws it. It is drawn rather than
+    // written so it stays crisp at any scale, and it marks the handle as something
+    // to grab -- a bare dot reads as a progress indicator.
+    const cross = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    cross.setAttribute('viewBox', '0 0 16 16');
+    cross.setAttribute('aria-hidden', 'true');
+    cross.setAttribute('class', 'm3d-layer-cross');
+    for (const d of ['M8 5v6', 'M5 8h6']) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      cross.append(path);
+    }
+    node.append(cross);
     return node;
   }
 

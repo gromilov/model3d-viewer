@@ -4504,9 +4504,9 @@ function createCube(canvas, onPick, onOrbit) {
  * radii, so nothing has to be invented per component.
  */
 const theme = {
-  accent: '#4cc4dd',
-  accentSoft: 'rgba(76, 196, 221, 0.12)',
-  accentLine: 'rgba(76, 196, 221, 0.38)',
+  accent: '#118980',
+  accentSoft: 'rgba(17, 137, 128, 0.16)',
+  accentLine: 'rgba(17, 137, 128, 0.45)',
   surface: 'rgba(24, 25, 27, 0.78)',
   // A neutral graphite rather than a blue-black: the scene behind the print is a
   // work surface, and a tinted one fights the filament colours for attention.
@@ -4536,8 +4536,6 @@ const ICONS = {
   reset: 'M13 8a5 5 0 1 1-1.5-3.6 M13 2v3h-3',
   // A cube in isometric: the model itself.
   model: 'M8 2l5.5 3.2v6.6L8 15l-5.5-3.2V5.2L8 2 M8 2v6.5 M8 8.5L2.5 5.2 M8 8.5l5.5-3.3 M8 8.5V15',
-  // Horizontal bands: a plate cut into layers.
-  sliced: 'M2 4.5h12 M2 8h12 M2 11.5h12 M4 2.6h8 M4 13.4h8',
   // A sun: the material's studio light.
   lighting: 'M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 1 0 0-5 M8 1v1.6 M8 13.4V15 M1 8h1.6 M13.4 8H15 M3.1 3.1l1.1 1.1 M11.8 11.8l1.1 1.1 M12.9 3.1l-1.1 1.1 M4.2 11.8l-1.1 1.1',
   // A flat grid in perspective: the build plate.
@@ -4554,18 +4552,37 @@ const ICONS = {
   saveTraced: 'M6.6 2.4l1.15 3.45L11.2 7l-3.45 1.15L6.6 11.6L5.45 8.15L2 7l3.45-1.15L6.6 2.4 M12.4 9.4v4.2 M10.6 11.8l1.8 1.8 1.8-1.8',
 };
 
+/**
+ * Icons that are filled rather than stroked.
+ *
+ * OrcaSlicer's layers glyph is a solid isometric stack -- a rhombus for the top
+ * plate and two chevrons for the ones beneath -- and drawn as an outline it reads
+ * as a wireframe box instead. Kept in a second table so the stroked icons stay a
+ * plain map, and so an entry here can never be accidentally rendered hollow.
+ */
+const SOLID_ICONS = {
+  // Proportions measured from the reference: a 28-pixel rhombus over two 11-pixel
+  // bands, with gaps about a third of a band's thickness.
+  layers: 'M8 1.2 L14.4 4.4 L8 7.6 L1.6 4.4 Z '
+    + 'M1.6 6.6 L8 9.8 L14.4 6.6 L14.4 8.6 L8 11.8 L1.6 8.6 Z '
+    + 'M1.6 9.6 L8 12.8 L14.4 9.6 L14.4 11.6 L8 14.8 L1.6 11.6 Z',
+};
+
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
 /** One icon, sized to the interface and coloured by its parent through `currentColor`. */
 function icon(name, size = 16) {
-  const path = ICONS[name];
+  const solid = SOLID_ICONS[name];
+  const path = solid ?? ICONS[name];
   if (path === undefined) return null;
   const svg = document.createElementNS(SVG_NAMESPACE, 'svg');
   svg.setAttribute('width', String(size));
   svg.setAttribute('height', String(size));
   svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
+  // A solid glyph is filled and has no stroke; a stroked one is the reverse. Both
+  // take their colour from the parent, so a filled icon behaves like the rest.
+  svg.setAttribute('fill', solid === undefined ? 'none' : 'currentColor');
+  svg.setAttribute('stroke', solid === undefined ? 'currentColor' : 'none');
   svg.setAttribute('stroke-width', '1.25');
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');
@@ -4680,9 +4697,9 @@ function frameScheduler(callback) {
 
 const CSS = `
 [data-model3d-viewer] {
-  --m3d-accent: #4cc4dd;
-  --m3d-accent-soft: rgba(76, 196, 221, 0.12);
-  --m3d-accent-line: rgba(76, 196, 221, 0.38);
+  --m3d-accent: #118980;
+  --m3d-accent-soft: rgba(17, 137, 128, 0.16);
+  --m3d-accent-line: rgba(17, 137, 128, 0.45);
   --m3d-surface: rgba(24, 25, 27, 0.78);
   --m3d-surface-solid: #1c1d20;
   --m3d-hairline: rgba(255, 255, 255, 0.10);
@@ -4984,12 +5001,12 @@ const CSS = `
   position: absolute;
   top: 12px;
   bottom: 12px;
-  right: 10px;
-  width: 26px;
+  right: 8px;
+  width: 30px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   pointer-events: auto;
 }
 [data-model3d-viewer] .m3d-layer-value {
@@ -5001,49 +5018,113 @@ const CSS = `
   white-space: nowrap;
 }
 [data-model3d-viewer] .m3d-layers.is-one .m3d-layer-value { color: var(--m3d-accent); }
+
+/* The track is the whole vertical strip, so it can be grabbed anywhere; the
+   groove inside it is what is actually drawn. Separating the two means the hit
+   area is wider than the thing it looks like, which is what a thin control
+   needs to be usable at all. */
 [data-model3d-viewer] .m3d-layer-track {
   position: relative;
   flex: 1 1 auto;
-  width: 2px;
-  background: rgba(255, 255, 255, 0.12);
-  border-radius: 1px;
+  width: 100%;
   cursor: pointer;
   touch-action: none;
+  display: flex;
+  justify-content: center;
 }
-/* A muted fill, not a neon bar: the band shows what is in view, and a glowing
-   column beside the print competes with it. */
-[data-model3d-viewer] .m3d-layer-band {
+
+/* An inset channel: a dark well with a hairline inside it, the way a physical
+   slot reads. OrcaSlicer's slider is a groove rather than a line, and a line on
+   its own looked like a scrollbar beside the print. */
+[data-model3d-viewer] .m3d-layer-groove {
   position: absolute;
-  left: -1px;
-  width: 4px;
-  background: rgba(255, 255, 255, 0.22);
-  border-radius: 2px;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 11px;
+  border-radius: 6px;
+  /* Only a little darker than the surface behind it: measured from the reference,
+     OrcaSlicer's well sits at about 76% of the backdrop's luminance, not at black.
+     A deep black channel read as a hole cut in the panel. */
+  background: rgba(0, 0, 0, 0.22);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.06),
+    inset 0 1px 2px rgba(0, 0, 0, 0.28);
   pointer-events: none;
 }
+
+/* The visible range, filled solid in the accent colour as OrcaSlicer does. The
+   earlier version was a muted grey bar, which said "this region exists" but not
+   "these are the layers you are looking at". */
+[data-model3d-viewer] .m3d-layer-band {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 11px;
+  border-radius: 6px;
+  /* Flat, not a gradient: measured across the reference's band, the colour is the
+     same 17,137,128 from end to end. A gradient here was decoration that made the
+     control look lit from one side. */
+  background: var(--m3d-accent);
+  pointer-events: none;
+}
+
+/* One knob shape for both ends: a filled disc with a cross, sized by its border
+   rather than by a background so the groove shows through the ring. */
 [data-model3d-viewer] .m3d-layer-handle {
   position: absolute;
   left: 50%;
-  transform: translate(-50%, 50%);
+  width: 20px;
+  height: 20px;
+  margin-left: -10px;
+  /* Centred on its own value: the knob is placed by its bottom offset, so half of it
+     has to hang below that line or the top of the knob, not its middle, marks the
+     layer. */
+  margin-bottom: -10px;
   border-radius: 50%;
   cursor: grab;
   touch-action: none;
   box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  transition: transform 90ms ease-out, box-shadow 120ms;
 }
+[data-model3d-viewer] .m3d-layer-handle:active { cursor: grabbing; transform: scale(1.08); }
+
 [data-model3d-viewer] .m3d-layer-handle.is-top {
-  width: 10px;
-  height: 10px;
-  border: 1px solid var(--m3d-accent);
   background: var(--m3d-accent);
+  box-shadow:
+    0 0 0 2px var(--m3d-surface-solid),
+    0 1px 3px rgba(0, 0, 0, 0.5);
 }
 [data-model3d-viewer] .m3d-layer-handle.is-bottom {
-  width: 7px;
-  height: 7px;
-  border: 1px solid var(--m3d-hairline-strong);
   background: var(--m3d-surface-solid);
+  box-shadow:
+    inset 0 0 0 2px var(--m3d-accent),
+    0 0 0 2px var(--m3d-surface-solid),
+    0 1px 3px rgba(0, 0, 0, 0.5);
 }
+/* A ring rather than a disc for the lower bound, so the two are told apart at a
+   glance while both stay the accent colour -- the same idea as OrcaSlicer's
+   filled and outlined knobs. */
+
+[data-model3d-viewer] .m3d-layer-cross {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: var(--m3d-surface-solid);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  pointer-events: none;
+}
+[data-model3d-viewer] .m3d-layer-handle.is-bottom .m3d-layer-cross {
+  stroke: var(--m3d-accent);
+}
+
 [data-model3d-viewer] .m3d-layer-handle:focus-visible {
   outline: 1px solid var(--m3d-accent-line);
-  outline-offset: 1px;
+  outline-offset: 3px;
 }
 /* The lower handle is not a separate control while the plate is cut to one
    layer, so it is drawn out of the way rather than removed: removing it would
@@ -5052,6 +5133,7 @@ const CSS = `
   pointer-events: none;
   opacity: 0;
 }
+
 [data-model3d-viewer] .m3d-one-layer {
   appearance: none;
   flex: 0 0 auto;
@@ -8565,7 +8647,7 @@ class ViewerPanel {
     this.segmented.hidden = true;
     this.segmentedButtons = {
       model: this.button({ icon: 'model', label: t('controls.model'), onClick: () => this.setView('model'), segment: true }),
-      sliced: this.button({ icon: 'sliced', label: t('controls.sliced'), onClick: () => this.setView('sliced'), segment: true }),
+      sliced: this.button({ icon: 'layers', label: t('controls.sliced'), onClick: () => this.setView('sliced'), segment: true }),
     };
     this.segmented.append(this.segmentedButtons.model, this.segmentedButtons.sliced);
 
@@ -9771,6 +9853,10 @@ class LayerSliderControl {
     this.dragging = null;
 
     this.valueNode = el('div', { class: 'm3d-layer-value' });
+    // The groove is a real box, not a hairline: OrcaSlicer's layer slider is an
+    // inset channel with the visible range filled solid, and that is what makes it
+    // read as a control rather than as a scrollbar thumb.
+    this.groove = el('div', { class: 'm3d-layer-groove' });
     this.band = el('div', { class: 'm3d-layer-band' });
     this.topHandle = this.makeHandle('top');
     this.bottomHandle = this.makeHandle('bottom');
@@ -9784,7 +9870,7 @@ class LayerSliderControl {
         this.onChange(this.range[0], this.range[1], !this.dim);
       },
       onWheel: (event) => this.onWheel(event),
-    }, [this.band, this.bottomHandle, this.topHandle]);
+    }, [this.groove, this.band, this.bottomHandle, this.topHandle]);
 
     this.oneLayerButton = el('button', {
       type: 'button',
@@ -9829,6 +9915,19 @@ class LayerSliderControl {
       },
       onKeyDown: (event) => this.onHandleKey(kind, event),
     });
+    // A plus inside the knob, as OrcaSlicer draws it. It is drawn rather than
+    // written so it stays crisp at any scale, and it marks the handle as something
+    // to grab -- a bare dot reads as a progress indicator.
+    const cross = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    cross.setAttribute('viewBox', '0 0 16 16');
+    cross.setAttribute('aria-hidden', 'true');
+    cross.setAttribute('class', 'm3d-layer-cross');
+    for (const d of ['M8 5v6', 'M5 8h6']) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      cross.append(path);
+    }
+    node.append(cross);
     return node;
   }
 

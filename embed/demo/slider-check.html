@@ -1,0 +1,84 @@
+<!doctype html><html><head><meta charset="utf-8"><title>slidercheck</title>
+<style>html,body{margin:0;background:#0a0b0c;color:#8a949c;font:11px monospace}
+#box{width:420px;height:420px}#log{padding:6px;white-space:pre}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The layer slider was remade after OrcaSlicer's: an inset groove with the visible
+// range filled flat in its teal, and two round knobs carrying a plus. The parts
+// that matter are asserted here -- the groove exists as a box rather than a
+// hairline, the band spans exactly the chosen range, and the knobs sit on the
+// range's ends -- because a control that merely looks close can be off by a layer.
+//
+// The colour is 17,137,128, measured off the reference rather than picked.
+const failures = [];
+const check = (ok, what) => { log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) failures.push(what); };
+
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/sliced.3mf', language: 'ru', remember: false, view: 'sliced',
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { if (s.kind === 'failed') document.title = 'FAIL ' + (s.message ?? ''); return; }
+    await sleep(500);
+    const info = panel.viewer.layerInfo();
+    const track = document.querySelector('.m3d-layer-track');
+    const groove = document.querySelector('.m3d-layer-groove');
+    const band = document.querySelector('.m3d-layer-band');
+    const top = document.querySelector('.m3d-layer-handle.is-top');
+    const bottom = document.querySelector('.m3d-layer-handle.is-bottom');
+    check(track !== null && groove !== null && band !== null && top !== null && bottom !== null,
+      'the slider is built from a track, a groove, a band and two knobs');
+
+    const grooveBox = groove.getBoundingClientRect();
+    check(grooveBox.width >= 8, 'the groove is a channel, not a hairline (' + grooveBox.width.toFixed(1) + 'px wide)');
+
+    // A range that is easy to reason about: layers 10..30 of whatever the file has.
+    const low = Math.min(10, info.count - 2);
+    const high = Math.min(30, info.count - 1);
+    panel.setLayers(low, high, false);
+    await sleep(250);
+
+    const trackBox = track.getBoundingClientRect();
+    const bandBox = band.getBoundingClientRect();
+    const expectedLow = (low / (info.count - 1));
+    const expectedHigh = (high / (info.count - 1));
+    // Band position measured as a fraction from the bottom of the track.
+    const actualLow = (trackBox.bottom - bandBox.bottom) / trackBox.height;
+    const actualHigh = (trackBox.bottom - bandBox.top) / trackBox.height;
+    check(Math.abs(actualLow - expectedLow) < 0.03,
+      'the band starts at layer ' + low + ' (fraction ' + actualLow.toFixed(3) + ' against ' + expectedLow.toFixed(3) + ')');
+    check(Math.abs(actualHigh - expectedHigh) < 0.03,
+      'the band ends at layer ' + high + ' (fraction ' + actualHigh.toFixed(3) + ' against ' + expectedHigh.toFixed(3) + ')');
+
+    // The knobs must straddle the band's ends, not float above or below them.
+    const topBox = top.getBoundingClientRect();
+    const bottomBox = bottom.getBoundingClientRect();
+    check(Math.abs((trackBox.bottom - (topBox.top + topBox.height / 2)) / trackBox.height - expectedHigh) < 0.04,
+      'the top knob is centred on the upper bound');
+    check(Math.abs((trackBox.bottom - (bottomBox.top + bottomBox.height / 2)) / trackBox.height - expectedLow) < 0.04,
+      'the bottom knob is centred on the lower bound');
+
+    // Colour: the band is the Orca teal, opaque, and each knob carries a cross.
+    const bandColour = getComputedStyle(band).backgroundColor;
+    check(bandColour.includes('17, 137, 128') || bandColour.includes('#118980'),
+      'the band is the reference teal (' + bandColour + ')');
+    check(top.querySelector('svg') !== null && bottom.querySelector('svg') !== null,
+      'both knobs carry their cross');
+
+    // One-layer mode collapses the band to a line and hides the lower knob.
+    panel.toggleOneLayer();
+    await sleep(250);
+    const collapsed = band.getBoundingClientRect();
+    check(collapsed.height < 4, 'one-layer mode collapses the band to a line (' + collapsed.height.toFixed(1) + 'px)');
+    check(getComputedStyle(bottom).opacity === '0', 'the lower knob is out of the way in one-layer mode');
+    panel.toggleOneLayer();
+    await sleep(200);
+
+    document.title = failures.length === 0 ? 'SLIDERCHECK ok' : 'FAIL ' + failures.join('; ');
+  },
+});
+</script></body></html>

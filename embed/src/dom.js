@@ -20,9 +20,9 @@
  * radii, so nothing has to be invented per component.
  */
 export const theme = {
-  accent: '#4cc4dd',
-  accentSoft: 'rgba(76, 196, 221, 0.12)',
-  accentLine: 'rgba(76, 196, 221, 0.38)',
+  accent: '#118980',
+  accentSoft: 'rgba(17, 137, 128, 0.16)',
+  accentLine: 'rgba(17, 137, 128, 0.45)',
   surface: 'rgba(24, 25, 27, 0.78)',
   // A neutral graphite rather than a blue-black: the scene behind the print is a
   // work surface, and a tinted one fights the filament colours for attention.
@@ -52,8 +52,6 @@ export const ICONS = {
   reset: 'M13 8a5 5 0 1 1-1.5-3.6 M13 2v3h-3',
   // A cube in isometric: the model itself.
   model: 'M8 2l5.5 3.2v6.6L8 15l-5.5-3.2V5.2L8 2 M8 2v6.5 M8 8.5L2.5 5.2 M8 8.5l5.5-3.3 M8 8.5V15',
-  // Horizontal bands: a plate cut into layers.
-  sliced: 'M2 4.5h12 M2 8h12 M2 11.5h12 M4 2.6h8 M4 13.4h8',
   // A sun: the material's studio light.
   lighting: 'M8 5.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 1 0 0-5 M8 1v1.6 M8 13.4V15 M1 8h1.6 M13.4 8H15 M3.1 3.1l1.1 1.1 M11.8 11.8l1.1 1.1 M12.9 3.1l-1.1 1.1 M4.2 11.8l-1.1 1.1',
   // A flat grid in perspective: the build plate.
@@ -70,18 +68,37 @@ export const ICONS = {
   saveTraced: 'M6.6 2.4l1.15 3.45L11.2 7l-3.45 1.15L6.6 11.6L5.45 8.15L2 7l3.45-1.15L6.6 2.4 M12.4 9.4v4.2 M10.6 11.8l1.8 1.8 1.8-1.8',
 };
 
+/**
+ * Icons that are filled rather than stroked.
+ *
+ * OrcaSlicer's layers glyph is a solid isometric stack -- a rhombus for the top
+ * plate and two chevrons for the ones beneath -- and drawn as an outline it reads
+ * as a wireframe box instead. Kept in a second table so the stroked icons stay a
+ * plain map, and so an entry here can never be accidentally rendered hollow.
+ */
+export const SOLID_ICONS = {
+  // Proportions measured from the reference: a 28-pixel rhombus over two 11-pixel
+  // bands, with gaps about a third of a band's thickness.
+  layers: 'M8 1.2 L14.4 4.4 L8 7.6 L1.6 4.4 Z '
+    + 'M1.6 6.6 L8 9.8 L14.4 6.6 L14.4 8.6 L8 11.8 L1.6 8.6 Z '
+    + 'M1.6 9.6 L8 12.8 L14.4 9.6 L14.4 11.6 L8 14.8 L1.6 11.6 Z',
+};
+
 const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
 
 /** One icon, sized to the interface and coloured by its parent through `currentColor`. */
 export function icon(name, size = 16) {
-  const path = ICONS[name];
+  const solid = SOLID_ICONS[name];
+  const path = solid ?? ICONS[name];
   if (path === undefined) return null;
   const svg = document.createElementNS(SVG_NAMESPACE, 'svg');
   svg.setAttribute('width', String(size));
   svg.setAttribute('height', String(size));
   svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
+  // A solid glyph is filled and has no stroke; a stroked one is the reverse. Both
+  // take their colour from the parent, so a filled icon behaves like the rest.
+  svg.setAttribute('fill', solid === undefined ? 'none' : 'currentColor');
+  svg.setAttribute('stroke', solid === undefined ? 'currentColor' : 'none');
   svg.setAttribute('stroke-width', '1.25');
   svg.setAttribute('stroke-linecap', 'round');
   svg.setAttribute('stroke-linejoin', 'round');

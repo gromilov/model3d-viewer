@@ -222,6 +222,21 @@ const CHECKS = [
     pixels: { minColours: 8, minNonBackground: 0.005 },
   },
   {
+    // The layer slider was remade after OrcaSlicer's: an inset groove with the
+    // visible range filled flat in its teal, two round knobs carrying a plus, and
+    // one-layer mode collapsing the band to a line. Asserted on geometry and
+    // colour rather than on the picture: a control can look close and still be a
+    // layer out, and the teal is a measured value (17,137,128) rather than a
+    // taste, so a drift in it should be visible.
+    name: 'embed: the layer slider is built like a slicer\'s',
+    page: 'slider-check.html',
+    size: [500, 540],
+    needs: 'sliced.3mf',
+    expect: /SLIDERCHECK ok/,
+    reject: /ERR|REJ|FAIL/,
+    pixels: { minColours: 16, minNonBackground: 0.01 },
+  },
+  {
     // The bed's grid was a fixed cyan: legible on the dark backgrounds, nearly
     // invisible on the light ones, and on white it was the strongest hue in the
     // frame -- a reference grid has no business being the most colourful thing on
