@@ -51,7 +51,20 @@
     "status.tracingBuild": "Building the acceleration structure…",
     "controls.traceMode": "Tracing",
     "controls.saveTraced": "Save the traced image",
-    "status.traceExporting": "Rendering {done}/{total}…"
+    "status.traceExporting": "Rendering {done}/{total}…",
+    "picker.title": "Colour",
+    "picker.saturationValue": "Saturation and brightness",
+    "picker.hue": "Hue",
+    "picker.hex": "Hex colour",
+    "picker.red": "Red",
+    "picker.green": "Green",
+    "picker.blue": "Blue",
+    "picker.saturation": "Saturation",
+    "picker.value": "Brightness",
+    "picker.palette": "Palette",
+    "picker.eyedropper": "Pick a colour from the screen",
+    "picker.ok": "OK",
+    "picker.cancel": "Cancel"
   },
   "ru": {
     "meta": {
@@ -105,6 +118,19 @@
     "status.tracingBuild": "Строю ускоряющую структуру…",
     "controls.traceMode": "Трассировка",
     "controls.saveTraced": "Сохранить трассировку в PNG",
-    "status.traceExporting": "Рендерю {done}/{total}…"
+    "status.traceExporting": "Рендерю {done}/{total}…",
+    "picker.title": "Цвет",
+    "picker.saturationValue": "Насыщенность и яркость",
+    "picker.hue": "Тон",
+    "picker.hex": "Цвет в HEX",
+    "picker.red": "Красный",
+    "picker.green": "Зелёный",
+    "picker.blue": "Синий",
+    "picker.saturation": "Насыщенность",
+    "picker.value": "Яркость",
+    "picker.palette": "Палитра",
+    "picker.eyedropper": "Взять цвет с экрана",
+    "picker.ok": "Ок",
+    "picker.cancel": "Отмена"
   }
 }

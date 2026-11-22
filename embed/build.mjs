@@ -42,6 +42,7 @@ const MODULES = [
   'i18n',
   'loader',
   'persist',
+  'picker',
   'bvh',
   'tracer',
   'panel',

@@ -1,0 +1,19 @@
+<!doctype html><html><head><meta charset="utf-8"><title>pickerlook</title>
+<style>html,body{margin:0;background:#111214}#box{width:320px;height:470px}</style></head>
+<body><div id="box"></div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/sliced.3mf', language: 'ru', remember: false, view: 'sliced',
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') return;
+    await new Promise((r) => setTimeout(r, 600));
+    panel.togglePlainLighting();
+    await new Promise((r) => setTimeout(r, 300));
+    panel.openPicker(1);
+    await new Promise((r) => setTimeout(r, 300));
+    document.title = 'SHOT';
+  },
+});
+</script></body></html>

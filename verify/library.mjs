@@ -307,6 +307,37 @@ const CHECKS = [
     pixels: { minColours: 8, minNonBackground: 0.005 },
   },
   {
+    // The filaments used to be recoloured through a native `<input type="color">`,
+    // which hands the click to the operating system's colour panel: a sheet with a
+    // magnifier and a row of crayons on macOS, something else again on Windows.
+    // Nothing about it can be styled, and it is the only surface in the viewer that
+    // did not belong to the viewer. The replacement is asserted on behaviour the
+    // native dialog could never offer: the plate previews a colour while it is
+    // being chosen, Cancel puts back *exactly* the previous state -- including "no
+    // override at all", which is a different state from "an override equal to the
+    // file's colour" -- and the window covers the panel rather than the page.
+    name: 'embed: the colour window previews, commits and cancels',
+    page: 'picker-check.html',
+    size: [420, 460],
+    needs: 'sliced.3mf',
+    expect: /PICKERCHECK ok/,
+    reject: /ERR|REJ|FAIL/,
+    pixels: { minColours: 16, minNonBackground: 0.01 },
+  },
+  {
+    // A sidebar is short, and a modal that pushes its own OK button off the bottom
+    // is worse than no modal. Run at 260x330, which is smaller than any real
+    // sidebar: the window has to give way inside itself -- the colour field is the
+    // part that shrinks -- rather than clip or scroll.
+    name: 'embed: the colour window fits a short, narrow panel',
+    page: 'picker-short.html',
+    size: [260, 330],
+    needs: 'sliced.3mf',
+    expect: /PICKERSHORT ok \d+x\d+/,
+    reject: /ERR|REJ|FAIL/,
+    pixels: { minColours: 16, minNonBackground: 0.02 },
+  },
+  {
     // The pass loop armed a frame callback and a watchdog timer at once and let both
     // stand. On a plate whose pass outran the watchdog the timer won the race and the
     // abandoned frame callback started a second pass chain beside the first; the

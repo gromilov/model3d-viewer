@@ -1,0 +1,58 @@
+<!doctype html><html><head><meta charset="utf-8"><title>pickershort</title>
+<style>html,body{margin:0;background:#111214;color:#8a949c;font:11px monospace}
+#box{width:260px;height:330px}#log{padding:6px;white-space:pre}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A sidebar is short. 260x330 is narrower and shorter than any real one, which is
+// the point: the colour window has to give way *inside* itself rather than scroll
+// or clip. A modal whose OK button is below the bottom of the panel is worse than
+// no modal, because it looks finished and cannot be dismissed.
+const failures = [];
+const check = (ok, what) => { log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) failures.push(what); };
+
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/sliced.3mf', language: 'ru', remember: false, view: 'sliced',
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { if (s.kind === 'failed') document.title = 'FAIL ' + (s.message ?? ''); return; }
+    await sleep(500);
+    panel.togglePlainLighting();
+    await sleep(250);
+    panel.openPicker(0);
+    await sleep(300);
+
+    const root = panel.root.getBoundingClientRect();
+    const win = document.querySelector('.m3d-picker-window').getBoundingClientRect();
+    const okButton = document.querySelectorAll('.m3d-picker-button')[1].getBoundingClientRect();
+    const cancel = document.querySelectorAll('.m3d-picker-button')[0].getBoundingClientRect();
+    check(win.top >= root.top - 1 && win.bottom <= root.bottom + 1,
+      'the window fits inside the panel (' + Math.round(win.height) + 'px of ' + Math.round(root.height) + ')');
+    check(okButton.bottom <= root.bottom + 1, 'the OK button is inside the panel');
+    check(cancel.bottom <= root.bottom + 1, 'so is Cancel');
+    check(document.querySelector('.m3d-picker-window').scrollHeight
+      <= document.querySelector('.m3d-picker-window').clientHeight + 1,
+    'the window does not scroll: the colour field is what shrinks');
+
+    // The square may shrink but must stay aimable.
+    const square = document.querySelector('[data-picker-square]').getBoundingClientRect();
+    check(square.height >= 60, 'the colour square keeps a usable height (' + Math.round(square.height) + 'px)');
+    check(square.width >= 60, 'and a usable width (' + Math.round(square.width) + 'px)');
+
+    // The narrow case: at 260 the window is the panel's width minus a margin, and
+    // the three-across number rows must not overflow.
+    const rows = [...document.querySelectorAll('.m3d-picker-fields.is-three')];
+    const overflowing = rows.filter((row) => row.getBoundingClientRect().right > win.right + 1);
+    check(rows.length === 2, 'two three-across number rows');
+    check(overflowing.length === 0, overflowing.length + ' row(s) past the window edge');
+
+    document.title = failures.length === 0
+      ? 'PICKERSHORT ok ' + Math.round(square.width) + 'x' + Math.round(square.height)
+      : 'FAIL ' + failures.join('; ');
+  },
+});
+</script></body></html>

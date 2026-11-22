@@ -33,6 +33,7 @@ import { buildBvh } from './bvh.js';
 import { createTracer, createStillRender } from './tracer.js';
 import { createCube } from './cube.js';
 import { injectStyles } from './styles.js';
+import { ColorPickerControl } from './picker.js';
 import {
   STORE_VERSION,
   createLocalStore,
@@ -440,7 +441,10 @@ export class ViewerPanel {
 
     this.root = el('section', {
       'data-model3d-viewer': true,
-      style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0' },
+      // Positioned, because the colour window is a screen over the panel's own
+      // box rather than over the page: `inset: 0` needs a positioned ancestor,
+      // and the panel is the smallest one that means what a modal should mean.
+      style: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: '0', position: 'relative' },
     });
 
     // --- toolbar ---------------------------------------------------------
@@ -489,8 +493,7 @@ export class ViewerPanel {
     this.backgroundPicker = new BackgroundPickerControl({ t, onChange: (value) => this.setBackground(value) });
     this.paletteControl = new PaletteControl({
       t,
-      onChange: (slot, hex) => this.setFilament(slot, hex),
-      onSelect: (slot) => this.selectSlot(slot),
+      onPick: (slot) => this.openPicker(slot),
     });
 
     this.statsNode = el('span', { class: 'm3d-stats' });
@@ -561,6 +564,20 @@ export class ViewerPanel {
     this.navCube = null;
 
     append(this.root, [this.toolbar, this.surfaceRow, this.stage]);
+
+    // The colour window, built with the panel and mounted into its root, hidden
+    // until a swatch is clicked. Created here rather than lazily on first use so
+    // its DOM is in place when a keyboard user tabs to the swatches: a dialog
+    // that materialises on click has nothing to be tabbed into beforehand.
+    this.picker = new ColorPickerControl({
+      t,
+      document: this.document,
+      host: this.root,
+      onPreview: (hex) => this.previewFilament(hex),
+      onCommit: (hex) => this.commitFilament(hex),
+      onCancel: (hex) => this.cancelFilament(hex),
+    });
+
     clear(this.host);
     this.host.append(this.root);
 
@@ -1185,6 +1202,91 @@ export class ViewerPanel {
     this.queueSave();
   }
 
+  /* ---------------------------------------------------------- colour window -- */
+
+  /**
+   * Open the colour window for one filament.
+   *
+   * The colour it opens on is the one in force, not the file's own: a slot that
+   * was recoloured last visit should open on that colour, and its Cancel should
+   * put back exactly that colour rather than the file's original.
+   *
+   * Selecting the slot first is deliberate -- the surface sliders edit the active
+   * filament, and editing a colour without making that filament active would
+   * leave the sliders editing a different one.
+   */
+  openPicker(slot) {
+    if (this.state.plainLighting === true) return;
+    const palette = this.palette();
+    if (palette === undefined) return;
+    this.selectSlot(slot);
+    // What Cancel restores: the override if there is one, and the absence of an
+    // override if there is not. Remembering only the hex would turn Cancel into
+    // "make it the same colour as the file", which is not what it looked like.
+    this.pickerWasOverridden = Object.prototype.hasOwnProperty.call(this.state.paletteOverrides, slot);
+    this.pickerSlot = slot;
+    this.picker.show(
+      palette[slot],
+      palette,
+      `${this.t('controls.surfaceFor')} ${slot + 1}`,
+    );
+    this.paletteControl.setActive(slot);
+  }
+
+  /**
+   * Show a colour while the window is open.
+   *
+   * Previewing is the point of the window rather than a nicety: a filament colour
+   * is judged on the print, and a 16-pixel swatch is not the print. The engine is
+   * already built for it -- a palette change is one uniform upload, not a rebuild
+   * -- so a drag can recolour the plate live.
+   */
+  previewFilament(hex) {
+    if (this.pickerSlot === undefined) return;
+    const palette = this.palette();
+    if (palette === undefined) return;
+    palette[this.pickerSlot] = hex;
+    this.viewer?.setPalette(palette);
+    this.paletteControl.setColour(this.pickerSlot, hex);
+  }
+
+  /**
+   * Keep the colour the window was accepted on.
+   *
+   * Going through `setFilament` rather than assigning here means the override,
+   * the viewer and the swatch row are updated by the one path that already knows
+   * how, and the write to storage is queued once.
+   */
+  commitFilament(hex) {
+    const slot = this.pickerSlot;
+    this.pickerSlot = undefined;
+    if (slot === undefined) return;
+    this.setFilament(slot, hex);
+  }
+
+  /** Put back what the slot held when the window opened. */
+  cancelFilament() {
+    const slot = this.pickerSlot;
+    this.pickerSlot = undefined;
+    if (slot === undefined) return;
+    const { paletteOverrides } = this.state;
+    // Cancel has to be able to restore "no override", which is a different state
+    // from "an override equal to the file's colour": the first follows the file if
+    // it is edited elsewhere, the second does not.
+    if (this.pickerWasOverridden === true) {
+      this.setFilament(slot, paletteOverrides[slot]);
+      return;
+    }
+    if (Object.prototype.hasOwnProperty.call(paletteOverrides, slot)) {
+      const rest = { ...paletteOverrides };
+      delete rest[slot];
+      this.state.paletteOverrides = rest;
+    }
+    this.syncPalette();
+    this.applyPalette();
+    this.queueSave();
+  }
+
   /** The palette in force: the file's own colours with overrides applied. */
   palette() {
     const { state } = this;
@@ -1440,6 +1542,9 @@ export class ViewerPanel {
     this.disposed = true;
     this.readController?.abort();
     this.readController = null;
+    // A window left open would take a pointer listener on a detached node with
+    // it, and its preview would keep calling into a disposed viewer.
+    this.picker?.dispose();
     this.clearStage();
     clear(this.host);
   }
@@ -1519,21 +1624,34 @@ class BackgroundPickerControl {
  *
  * A 3MF project numbers its filaments from one; the swatch order is that same
  * order, so the strip reads as the print's own colour list. Each swatch both
- * names a filament and opens the picker for it: clicking selects which filament
- * the surface sliders edit, and the colour input on top changes that filament's
- * colour. A second row of swatches for the same purpose was a copy of this one.
+ * names a filament and opens the colour window for it: one click selects which
+ * filament the surface sliders edit, and the same click opens the panel's own
+ * colour window on that filament.
+ *
+ * Every swatch is kept as a node reference rather than rebuilt. The window
+ * previews a colour while it is open, which means the strip is written to on
+ * every pointer move of a drag -- redrawing the row sixty times a second would
+ * replace the node whose click is still in flight, and a swatch rebuilt under the
+ * pointer never receives its own click.
  */
 class PaletteControl {
-  constructor({ t, onChange, onSelect }) {
+  constructor({ t, onPick }) {
     this.t = t;
-    this.onChange = onChange;
-    this.onSelect = onSelect;
+    this.onPick = onPick;
     this.palette = undefined;
     this.activeSlot = undefined;
     this.selectable = false;
-    this.node = el('span', { class: 'm3d-palette', 'data-model3d-palette': true, 'aria-label': t('controls.palette'), title: t('controls.palette') });
+    /** The swatch nodes, by slot, so a preview is one style write. */
+    this.nodes = [];
+    this.node = el('span', {
+      class: 'm3d-palette',
+      'data-model3d-palette': true,
+      'aria-label': t('controls.palette'),
+      title: t('controls.palette'),
+    });
   }
 
+  /** Whether the swatches are controls or just a legend. */
   setSelectable(selectable) {
     if (this.selectable === selectable) return;
     this.selectable = selectable;
@@ -1547,9 +1665,29 @@ class PaletteControl {
     if (changed) this.render();
   }
 
+  /** Move the active ring without rebuilding the row. */
+  setActive(slot) {
+    if (this.activeSlot === slot) return;
+    this.activeSlot = slot;
+    this.nodes.forEach((node, index) => node.classList.toggle('is-active', index === slot));
+  }
+
+  /**
+   * Show one slot's colour now.
+   *
+   * Used by the window's live preview. The palette array itself is not touched:
+   * the panel's state is the truth, and a preview is not a change until the
+   * window is accepted.
+   */
+  setColour(slot, hex) {
+    const node = this.nodes[slot];
+    if (node !== undefined) node.style.background = hex;
+  }
+
   /** Rebuild the swatches. Only called when the colours themselves change. */
   render() {
     clear(this.node);
+    this.nodes = [];
     if (this.palette === undefined || this.palette.length === 0) {
       this.node.hidden = true;
       return;
@@ -1557,25 +1695,18 @@ class PaletteControl {
     this.node.hidden = false;
     this.palette.forEach((hex, index) => {
       const active = index === this.activeSlot;
-      const swatch = el('span', {
-        class: `m3d-swatch${active ? ' is-active' : ''}${this.selectable ? ' is-selectable' : ''}`,
-        title: this.selectable
-          ? `${this.t('controls.surfaceFor')} · ${hex}`
-          : hex,
+      const swatch = el('button', {
+        type: 'button',
+        class: `m3d-swatch${active ? ' is-active' : ''}${this.selectable ? ' is-editable' : ''}`,
+        title: this.selectable ? `${this.t('controls.surfaceFor')} ${index + 1} · ${hex}` : hex,
         style: { background: hex },
         'aria-label': `${this.t('controls.surfaceFor')} ${index + 1}`,
-        onClick: this.selectable ? () => this.onSelect(index) : undefined,
-      }, this.onChange === undefined || !this.selectable ? null : el('input', {
-        type: 'color',
-        'aria-label': `${this.t('controls.surfaceFor')} ${index + 1}`,
-        onInput: (event) => this.onChange(index, event.target.value),
-        // The input sits on top of the swatch and takes the click, so the
-        // selection is made from the event's bubble rather than by the swatch
-        // never receiving it.
-        onClick: () => this.onSelect(index),
-      }));
-      const input = swatch.querySelector('input');
-      if (input !== null) input.value = hex;
+        // The swatch opens the colour window itself. The invisible native input
+        // that used to sit on top of it is gone: the window it opened belonged to
+        // the operating system, and this one belongs to the panel.
+        onClick: this.selectable ? () => this.onPick(index) : undefined,
+      });
+      this.nodes.push(swatch);
       this.node.append(swatch);
     });
   }

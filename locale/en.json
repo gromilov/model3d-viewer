@@ -50,5 +50,18 @@
   "status.tracingBuild": "Building the acceleration structure…",
   "controls.traceMode": "Tracing",
   "controls.saveTraced": "Save the traced image",
-  "status.traceExporting": "Rendering {done}/{total}…"
+  "status.traceExporting": "Rendering {done}/{total}…",
+  "picker.title": "Colour",
+  "picker.saturationValue": "Saturation and brightness",
+  "picker.hue": "Hue",
+  "picker.hex": "Hex colour",
+  "picker.red": "Red",
+  "picker.green": "Green",
+  "picker.blue": "Blue",
+  "picker.saturation": "Saturation",
+  "picker.value": "Brightness",
+  "picker.palette": "Palette",
+  "picker.eyedropper": "Pick a colour from the screen",
+  "picker.ok": "OK",
+  "picker.cancel": "Cancel"
 }

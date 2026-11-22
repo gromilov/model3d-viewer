@@ -203,32 +203,299 @@ const CSS = `
   gap: 3px;
   flex: 0 0 auto;
 }
-/* One swatch does both jobs: it names the filament and opens the picker for it.
-   The visible box is the swatch; the native colour input sits invisibly on top,
-   because a colour input cannot be styled and is otherwise a grey rectangle. */
+/* One swatch does both jobs: it names the filament and opens the colour window
+   for it. It is a real button now -- the native colour input that used to sit
+   invisibly on top of it opened the operating system's own colour sheet, which
+   is the one surface in the viewer that could not be styled or matched. */
 [data-model3d-viewer] .m3d-swatch {
   position: relative;
   width: 16px;
   height: 16px;
+  padding: 0;
   border-radius: 2px;
   border: 1px solid var(--m3d-hairline-strong);
   display: inline-block;
   box-sizing: border-box;
+  appearance: none;
+  background-color: transparent;
+  font: inherit;
+  color: inherit;
 }
 [data-model3d-viewer] .m3d-swatch.is-active {
   border: 2px solid var(--m3d-accent);
   box-shadow: 0 0 0 1px var(--m3d-surface-solid);
 }
-[data-model3d-viewer] .m3d-swatch.is-selectable { cursor: pointer; }
-[data-model3d-viewer] .m3d-swatch input[type="color"] {
+[data-model3d-viewer] .m3d-swatch.is-editable { cursor: pointer; }
+[data-model3d-viewer] .m3d-swatch.is-editable:hover {
+  box-shadow: 0 0 0 1px var(--m3d-hairline-strong);
+}
+[data-model3d-viewer] .m3d-swatch:focus-visible {
+  outline: 1px solid var(--m3d-accent-line);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------- colour window -- */
+
+/* A screen over the panel's own box, not over the page: a modal that covered the
+   whole application would dim someone else's editor to ask about one filament. */
+[data-model3d-viewer] .m3d-picker {
   position: absolute;
   inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px;
+  box-sizing: border-box;
+  /* Just enough dimming to push the toolbar back, no blur: the canvas behind is
+     already the loudest thing on screen. */
+  background: rgba(8, 9, 10, 0.62);
+}
+
+/* A column, so the colour field is the part that gives way when the sidebar is
+   short. Scrolling the window instead would put the OK button off the bottom of
+   the panel, which is the one control a modal cannot hide. */
+[data-model3d-viewer] .m3d-picker-window {
+  display: flex;
+  flex-direction: column;
+  width: min(268px, 100%);
+  max-height: 100%;
+  box-sizing: border-box;
+  padding: 10px;
+  border-radius: 6px;
+  border: 1px solid var(--m3d-hairline-strong);
+  background: #202124;
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(0, 0, 0, 0.4);
+  outline: none;
+}
+
+[data-model3d-viewer] .m3d-picker-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 9px;
+}
+[data-model3d-viewer] .m3d-picker-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--m3d-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+[data-model3d-viewer] .m3d-picker-body {
+  display: flex;
+  gap: 8px;
+  /* The field's natural height, and its floor: below about a hundred pixels the
+     square is too coarse to aim at, and past it the square would push the buttons
+     out of a short panel. */
+  flex: 0 1 148px;
+  min-height: 88px;
+}
+
+/* The colour field. The gradients are set from script, because the hue layer
+   changes with the cursor; the sizes and the corner rounding are here. */
+[data-model3d-viewer] .m3d-picker-square {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  border-radius: 4px;
+  cursor: crosshair;
+  touch-action: none;
+  /* An inset ring, so the white corner of the square does not bleed into a light
+     window and the black corner keeps a visible edge on a dark one. */
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+
+/* A ring with a hole, so the colour under the cursor stays visible. The two-stop
+   shadow is the hole: a dark outline for light colours, a light one for dark. */
+[data-model3d-viewer] .m3d-picker-cursor {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55), inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+[data-model3d-viewer] .m3d-picker-hue {
+  position: relative;
+  flex: 0 0 auto;
+  width: 14px;
+  border-radius: 4px;
+  cursor: ns-resize;
+  touch-action: none;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+}
+/* Two short rules across the strip rather than a ring: a ring on a 14-pixel strip
+   has no room to show the colour it is pointing at. */
+[data-model3d-viewer] .m3d-picker-hue-cursor {
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  height: 3px;
+  margin-top: -1.5px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+  box-sizing: border-box;
+}
+
+[data-model3d-viewer] .m3d-picker-fields {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+[data-model3d-viewer] .m3d-picker-field {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 6px;
+  height: 26px;
+  border-radius: 3px;
+  border: 1px solid var(--m3d-hairline-strong);
+  background: rgba(0, 0, 0, 0.22);
+  box-sizing: border-box;
+}
+[data-model3d-viewer] .m3d-picker-field-label {
+  flex: 0 0 auto;
+  font-size: 9px;
+  color: var(--m3d-text-dim);
+  text-transform: uppercase;
+}
+[data-model3d-viewer] .m3d-picker-field input,
+[data-model3d-viewer] .m3d-picker-hex-row input {
+  flex: 1 1 auto;
+  min-width: 0;
   width: 100%;
-  height: 100%;
-  opacity: 0;
+  border: none;
+  background: transparent;
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 0;
+  outline: none;
+}
+/* The hex field is a field too, but it spans the window and holds seven characters
+   against the numbers' three, so it gets its own row rather than sharing a cell.
+   A chip inside it shows the colour the text means: reading a hex code back is not
+   how anyone checks a colour. */
+[data-model3d-viewer] .m3d-picker-hex-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 0 6px 0 0;
+  height: 26px;
+  border-radius: 3px;
+  border: 1px solid var(--m3d-hairline-strong);
+  background: rgba(0, 0, 0, 0.22);
+  box-sizing: border-box;
+}
+[data-model3d-viewer] .m3d-picker-chip {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 24px;
+  margin: -1px 0 -1px -1px;
+  border-radius: 2px 0 0 2px;
+  border: 1px solid var(--m3d-hairline-strong);
+  box-sizing: border-box;
+  /* The same outline the swatches use, so a white chip is not invisible. */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+[data-model3d-viewer] .m3d-picker-field input { text-align: right; }
+[data-model3d-viewer] .m3d-picker-field:focus-within,
+[data-model3d-viewer] .m3d-picker-hex-row:focus-within {
+  border-color: var(--m3d-accent-line);
+}
+[data-model3d-viewer] .m3d-picker-hex-row input { text-align: left; }
+
+/* The file's own colours, one row: copying a filament colour from its neighbour
+   beats retyping a hex code remembered from somewhere else. */
+[data-model3d-viewer] .m3d-picker-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+[data-model3d-viewer] .m3d-picker-preset {
+  appearance: none;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 3px;
+  /* A little darker than the swatches' hairline: these sit on a lighter panel
+     than the toolbar's, and a white filament against a white preset is otherwise
+     an empty box. */
+  border: 1px solid rgba(0, 0, 0, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+}
+[data-model3d-viewer] .m3d-picker-preset:hover { border-color: var(--m3d-text); }
+
+[data-model3d-viewer] .m3d-picker-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+}
+[data-model3d-viewer] .m3d-picker-spacer { flex: 1 1 auto; }
+
+[data-model3d-viewer] .m3d-picker-button {
+  appearance: none;
+  height: 26px;
+  padding: 0 12px;
+  border-radius: 3px;
+  border: 1px solid var(--m3d-hairline-strong);
+  background: transparent;
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+[data-model3d-viewer] .m3d-picker-button:hover { background: var(--m3d-hairline); }
+/* Accepting is the one filled control in the panel, and it is filled with the
+   colour being chosen: the button is the largest sample of the result there is. */
+[data-model3d-viewer] .m3d-picker-button.is-primary {
+  border-color: transparent;
+  color: #0b0c0d;
+  font-weight: 600;
+  background: var(--m3d-picker-current, var(--m3d-accent));
+}
+
+[data-model3d-viewer] .m3d-picker-icon {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
   padding: 0;
   border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--m3d-text-dim);
   cursor: pointer;
+  flex: 0 0 auto;
+}
+[data-model3d-viewer] .m3d-picker-icon:hover {
+  background: var(--m3d-hairline);
+  color: var(--m3d-text);
 }
 
 /* ------------------------------------------------------------- background -- */

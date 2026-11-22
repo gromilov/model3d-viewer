@@ -1,0 +1,162 @@
+<!doctype html><html><head><meta charset="utf-8"><title>pickercheck</title>
+<style>html,body{margin:0;background:#0a0b0c;color:#8a949c;font:11px monospace}
+#box{width:420px;height:460px}#log{padding:6px;white-space:pre}</style></head>
+<body><div id="box"></div><div id="log">start</div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { document.title = 'REJ ' + (e.reason?.message ?? e.reason); });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The colour window replaced the browser's own. What is asserted here is what
+// the native input could never promise: that the colour is previewed on the
+// print while it is being chosen, that Cancel puts back *exactly* what was there
+// including "no override at all", and that the window lives inside the panel
+// rather than over the whole page.
+const failures = [];
+const check = (ok, what) => { log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) failures.push(what); };
+const hexOf = (el) => {
+  const c = getComputedStyle(el).backgroundColor.match(/\d+/g);
+  return c === null ? '' : '#' + c.slice(0, 3).map((n) => Number(n).toString(16).padStart(2, '0')).join('');
+};
+
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/sliced.3mf', language: 'ru', remember: false, view: 'sliced',
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { if (s.kind === 'failed') document.title = 'FAIL ' + (s.message ?? ''); return; }
+    await sleep(500);
+
+    // The material sliders are what a filament is edited with, so the swatches
+    // are only selectable in material mode; plain shading has no highlight to
+    // tune. Switching first is part of the setup, not a finding.
+    panel.togglePlainLighting();
+    await sleep(300);
+
+    const swatches = [...document.querySelectorAll('.m3d-palette .m3d-swatch')];
+    check(swatches.length >= 1, swatches.length + ' filament swatch(es)');
+    // 1. No native colour input is left anywhere: that input is the thing that
+    //    opened the operating system's sheet, and an invisible one still sitting
+    //    on top of a swatch would take the click before the panel's own window.
+    check(document.querySelectorAll('input[type="color"]').length === 0,
+      'no native colour input is left in the panel');
+
+    const original = panel.palette()[0];
+    const swatch = swatches[0];
+    const swatchBox = swatch.getBoundingClientRect();
+
+    // 2. The window opens on a swatch click, from the DOM, as a user would.
+    swatch.click();
+    await sleep(150);
+    const picker = document.querySelector('[data-model3d-picker]');
+    check(picker !== null && picker.hidden === false, 'clicking a swatch opens the colour window');
+    const pickerBox = picker.getBoundingClientRect();
+    const rootBox = panel.root.getBoundingClientRect();
+    check(Math.abs(pickerBox.width - rootBox.width) < 2 && Math.abs(pickerBox.height - rootBox.height) < 2,
+      'the window covers the panel, not the page (' + Math.round(pickerBox.width) + 'x' + Math.round(pickerBox.height) + ')');
+    check(panel.root.contains(picker), 'the window is inside the panel root');
+    check(swatchBox.width > 0, 'the swatch had a real box to click (' + swatchBox.width.toFixed(0) + 'px)');
+
+    // 3. The square and the strip are boxes with gradients, not flat fills, and
+    //    the cursors sit where the colour says they should.
+    const square = document.querySelector('[data-picker-square]');
+    const hue = document.querySelector('[data-picker-hue]');
+    check(square !== null && square.getBoundingClientRect().width >= 60,
+      'the colour square is a real field (' + Math.round(square?.getBoundingClientRect().width ?? 0) + 'px)');
+    // Two gradients over one flat colour: a black wash from the bottom for value,
+    // a white wash from the left for saturation, and the hue itself underneath.
+    // The hue layer is a solid colour, so counting gradients alone would say two.
+    const layers = getComputedStyle(square).backgroundImage;
+    const gradients = (layers.match(/linear-gradient/g) ?? []).length;
+    check(gradients === 2 && layers.includes('rgb(') , 'the square is two washes over the hue ('
+      + gradients + ' gradient(s), hue layer ' + (layers.includes('rgb(') ? 'present' : 'missing') + ')');
+
+    // 4. Typing a hex colour previews it on the plate immediately, which is the
+    //    whole reason for a window of our own rather than a system dialog.
+    const field = document.querySelector('.m3d-picker-hex');
+    field.value = '#ff0066';
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(120);
+    check(panel.viewer.paletteInfo()[0] === '#ff0066',
+      'the plate previews the colour while the window is open (engine says ' + panel.viewer.paletteInfo()[0] + ')');
+    check(hexOf(document.querySelectorAll('.m3d-palette .m3d-swatch')[0]) === '#ff0066',
+      'the swatch previews it too (' + hexOf(document.querySelectorAll('.m3d-palette .m3d-swatch')[0]) + ')');
+    // The HSV fields follow the hex rather than going stale.
+    const numbers = [...document.querySelectorAll('.m3d-picker-field input')].map((i) => i.value);
+    check(numbers[0] === '255' && numbers[1] === '0' && numbers[2] === '102',
+      'the R, G and B fields agree with the hex (' + numbers.slice(0, 3).join(', ') + ')');
+    // 336 is the hue of #ff0066: (0 - 102) / 255 * 60 + 360.
+    check(numbers[3] === '336', 'H reads 336 for #ff0066 (' + numbers[3] + ')');
+
+    // 5. Cancel puts back the colour that was there, and leaves no override: a
+    //    "cancel" that left the new colour would be the worst possible outcome.
+    document.querySelectorAll('.m3d-picker-button')[0].click();
+    await sleep(150);
+    check(picker.hidden === true, 'Cancel closes the window');
+    check(panel.palette()[0] === original, 'Cancel restores the colour (' + panel.palette()[0] + ' vs ' + original + ')');
+    check(panel.viewer.paletteInfo()[0] === original, 'the engine went back too (' + panel.viewer.paletteInfo()[0] + ')');
+    check(Object.keys(panel.state.paletteOverrides).length === 0,
+      'Cancel leaves no override behind, so the file\'s colour still rules');
+
+    // 6. OK keeps it, and the value survives a repaint of the swatch row.
+    panel.openPicker(0);
+    await sleep(120);
+    const field2 = document.querySelector('.m3d-picker-hex');
+    field2.value = '#00ff88';
+    field2.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(100);
+    document.querySelectorAll('.m3d-picker-button')[1].click();
+    await sleep(150);
+    check(panel.palette()[0] === '#00ff88', 'OK keeps the colour (' + panel.palette()[0] + ')');
+    check(panel.state.paletteOverrides[0] === '#00ff88', 'the colour is stored as an override of that slot');
+    check(hexOf(document.querySelectorAll('.m3d-palette .m3d-swatch')[0]) === '#00ff88',
+      'the swatch row shows the accepted colour');
+
+    // 7. Escape dismisses, Enter accepts -- the two keys a window has to have.
+    //    Driven on the window itself, because that is where the handler lives.
+    panel.openPicker(0);
+    await sleep(120);
+    const win = document.querySelector('.m3d-picker-window');
+    const f3 = document.querySelector('.m3d-picker-hex');
+    f3.value = '#123456';
+    f3.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(80);
+    win.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await sleep(120);
+    check(panel.palette()[0] === '#00ff88', 'Escape cancels (' + panel.palette()[0] + ')');
+
+    panel.openPicker(0);
+    await sleep(120);
+    const f4 = document.querySelector('.m3d-picker-hex');
+    f4.value = '#123456';
+    f4.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(80);
+    document.querySelector('.m3d-picker-window')
+      .dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+    await sleep(120);
+    check(panel.palette()[0] === '#123456', 'Enter accepts (' + panel.palette()[0] + ')');
+
+    // 8. A colour typed with no hue -- black -- must not lose the hue the window
+    //    already had, or the square's cursor jumps to the corner and dragging up
+    //    from black produces red instead of the colour being worked on.
+    panel.openPicker(0);
+    await sleep(120);
+    const f5 = document.querySelector('.m3d-picker-hex');
+    f5.value = '#202020';
+    f5.dispatchEvent(new Event('input', { bubbles: true }));
+    await sleep(80);
+    const hueValue = Number([...document.querySelectorAll('.m3d-picker-field input')][3].value);
+    check(hueValue === 210, 'a grey keeps the hue the window already had (' + hueValue + ')');
+    document.querySelectorAll('.m3d-picker-button')[0].click();
+    await sleep(100);
+
+    // 9. The presets row offers the file's own palette, one button per filament.
+    check(document.querySelectorAll('[data-picker-presets] .m3d-picker-preset').length === panel.palette().length,
+      'the window offers the file\'s own palette to copy from');
+    check(document.querySelectorAll('[data-picker-presets] button').length >= 1,
+      'the presets are real buttons');
+
+    document.title = failures.length === 0 ? 'PICKERCHECK ok' : 'FAIL ' + failures.join('; ');
+  },
+});
+</script></body></html>

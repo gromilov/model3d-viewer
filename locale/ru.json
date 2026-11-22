@@ -50,5 +50,18 @@
   "status.tracingBuild": "Строю ускоряющую структуру…",
   "controls.traceMode": "Трассировка",
   "controls.saveTraced": "Сохранить трассировку в PNG",
-  "status.traceExporting": "Рендерю {done}/{total}…"
+  "status.traceExporting": "Рендерю {done}/{total}…",
+  "picker.title": "Цвет",
+  "picker.saturationValue": "Насыщенность и яркость",
+  "picker.hue": "Тон",
+  "picker.hex": "Цвет в HEX",
+  "picker.red": "Красный",
+  "picker.green": "Зелёный",
+  "picker.blue": "Синий",
+  "picker.saturation": "Насыщенность",
+  "picker.value": "Яркость",
+  "picker.palette": "Палитра",
+  "picker.eyedropper": "Взять цвет с экрана",
+  "picker.ok": "Ок",
+  "picker.cancel": "Отмена"
 }

@@ -66,6 +66,12 @@ export const ICONS = {
   trace: 'M8 2l1.5 4.5L14 8l-4.5 1.5L8 14l-1.5-4.5L2 8l4.5-1.5L8 2',
   // The same star, smaller, beside a downward arrow: that frame, written to a file.
   saveTraced: 'M6.6 2.4l1.15 3.45L11.2 7l-3.45 1.15L6.6 11.6L5.45 8.15L2 7l3.45-1.15L6.6 2.4 M12.4 9.4v4.2 M10.6 11.8l1.8 1.8 1.8-1.8',
+  // A cross: dismissing a window. Two strokes rather than a glyph, so it stays
+  // crisp at 10 pixels inside a colour window's head.
+  close: 'M4 4l8 8 M12 4l-8 8',
+  // A pipette: sampling a colour off the screen. The body is a slanted barrel
+  // with a drop at the tip -- drawn after a droplet alone, which read as weather.
+  eyedropper: 'M10.2 3.4l2.4 2.4 M11.4 2.2a1.7 1.7 0 0 1 2.4 2.4l-1.3 1.3-2.4-2.4 1.3-1.3 M10.1 5.9l-5.4 5.4-.7 2.6 2.6-.7 5.4-5.4',
 };
 
 /**
