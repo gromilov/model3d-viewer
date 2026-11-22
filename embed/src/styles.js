@@ -236,46 +236,60 @@ const CSS = `
 
 /* ---------------------------------------------------------- colour window -- */
 
-/* A screen over the panel's own box, not over the page: a modal that covered the
-   whole application would dim someone else's editor to ask about one filament. */
+/* A popover, not a screen. It is anchored under the swatch that opened it and
+   covers nothing: the whole point of choosing a filament colour here is watching
+   the print change, so a scrim over the print would hide the one thing the choice
+   is about. Position comes from script, because it depends on the swatch's place
+   in the panel; everything else is here. */
 [data-model3d-viewer] .m3d-picker {
   position: absolute;
-  inset: 0;
   z-index: 40;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 10px;
   box-sizing: border-box;
-  /* Just enough dimming to push the toolbar back, no blur: the canvas behind is
-     already the loudest thing on screen. */
-  background: rgba(8, 9, 10, 0.62);
+  /* The height cap comes from script, as the room between the swatch and the
+     panel's edge. The min-height: 0 below is what lets the window inside actually
+     shrink to it: without it a flex child keeps its content height and the
+     popover overflows the cap it was given. */
+  min-height: 0;
 }
 
-/* A column, so the colour field is the part that gives way when the sidebar is
-   short. Scrolling the window instead would put the OK button off the bottom of
-   the panel, which is the one control a modal cannot hide. */
+/* No frame. The popover is a panel of colour and numbers, not a dialog: a border
+   and a radius would draw a box around what is already a distinct surface. The
+   shadow is what separates it from the scene behind, and only downwards, so the
+   edge against the canvas is not a hard line. */
 [data-model3d-viewer] .m3d-picker-window {
   display: flex;
   flex-direction: column;
-  width: min(268px, 100%);
+  width: 236px;
   max-height: 100%;
+  /* Scrolls rather than growing past the cap: a short sidebar has no room for
+     the whole popover, and its OK button has to stay reachable. */
+  overflow-y: auto;
+  overflow-x: hidden;
   box-sizing: border-box;
-  padding: 10px;
-  border-radius: 6px;
-  border: 1px solid var(--m3d-hairline-strong);
+  padding: 9px;
+  border-radius: 5px;
+  border: none;
   background: #202124;
-  box-shadow:
-    0 18px 48px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
   outline: none;
 }
 
+/* The head and the buttons stay put and the middle scrolls, because in a short
+   sidebar the window has to scroll and the one thing that must never scroll out
+   of reach is the pair that accepts and cancels. Sticky rather than fixed: they
+   are laid out by the same flex column and only stop moving once they would
+   leave it. */
 [data-model3d-viewer] .m3d-picker-head {
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 9px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #202124;
+  padding-bottom: 2px;
 }
 [data-model3d-viewer] .m3d-picker-title {
   flex: 1 1 auto;
@@ -356,6 +370,9 @@ const CSS = `
   gap: 6px;
   margin-top: 8px;
 }
+/* A filled cell, not an outlined one: with a border on every cell the popover
+   reads as a form. The fill is enough to say "this is an input", and the label
+   letter is what says which. */
 [data-model3d-viewer] .m3d-picker-field {
   display: flex;
   align-items: center;
@@ -363,10 +380,10 @@ const CSS = `
   flex: 1 1 0;
   min-width: 0;
   padding: 0 6px;
-  height: 26px;
+  height: 25px;
   border-radius: 3px;
-  border: 1px solid var(--m3d-hairline-strong);
-  background: rgba(0, 0, 0, 0.22);
+  border: none;
+  background: rgba(0, 0, 0, 0.28);
   box-sizing: border-box;
 }
 [data-model3d-viewer] .m3d-picker-field-label {
@@ -399,27 +416,24 @@ const CSS = `
   gap: 6px;
   margin-top: 8px;
   padding: 0 6px 0 0;
-  height: 26px;
+  height: 25px;
   border-radius: 3px;
-  border: 1px solid var(--m3d-hairline-strong);
-  background: rgba(0, 0, 0, 0.22);
+  border: none;
+  background: rgba(0, 0, 0, 0.28);
   box-sizing: border-box;
 }
 [data-model3d-viewer] .m3d-picker-chip {
   flex: 0 0 auto;
   align-self: stretch;
   width: 24px;
-  margin: -1px 0 -1px -1px;
-  border-radius: 2px 0 0 2px;
-  border: 1px solid var(--m3d-hairline-strong);
+  border-radius: 3px 0 0 3px;
   box-sizing: border-box;
-  /* The same outline the swatches use, so a white chip is not invisible. */
-  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
 }
 [data-model3d-viewer] .m3d-picker-field input { text-align: right; }
+/* No border to tint any more, so focus is a ring outside the cell. */
 [data-model3d-viewer] .m3d-picker-field:focus-within,
 [data-model3d-viewer] .m3d-picker-hex-row:focus-within {
-  border-color: var(--m3d-accent-line);
+  box-shadow: 0 0 0 1px var(--m3d-accent-line);
 }
 [data-model3d-viewer] .m3d-picker-hex-row input { text-align: left; }
 
@@ -438,20 +452,143 @@ const CSS = `
   height: 18px;
   padding: 0;
   border-radius: 3px;
-  /* A little darker than the swatches' hairline: these sit on a lighter panel
-     than the toolbar's, and a white filament against a white preset is otherwise
-     an empty box. */
-  border: 1px solid rgba(0, 0, 0, 0.55);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+  border: none;
   cursor: pointer;
 }
-[data-model3d-viewer] .m3d-picker-preset:hover { border-color: var(--m3d-text); }
+/* The ring appears on hover only. It has to be a ring rather than a glow, since
+   a white filament on a light popover is otherwise an invisible target. */
+[data-model3d-viewer] .m3d-picker-preset:hover {
+  box-shadow: 0 0 0 2px var(--m3d-text);
+}
+
+/* The filament's material, in the popover under its colour. The sliders were
+   built for a full-width strip and have to stack here: three per row would leave
+   each range about forty pixels, which cannot express a 0..1 value. */
+[data-model3d-viewer] .m3d-picker-surface {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 9px;
+  padding-top: 9px;
+  /* The one hairline in the popover, and it is a separator between two kinds of
+     setting rather than a frame around them. */
+  border-top: 1px solid var(--m3d-hairline);
+}
+[data-model3d-viewer] .m3d-picker-surface .m3d-slider {
+  display: flex;
+  width: 100%;
+}
+[data-model3d-viewer] .m3d-picker-surface .m3d-slider > .m3d-slider-label {
+  flex: 0 0 auto;
+  min-width: 74px;
+}
+[data-model3d-viewer] .m3d-picker-surface .m3d-slider input[type="range"] {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+[data-model3d-viewer] .m3d-picker-surface .m3d-slider > .m3d-slider-value {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
+/* The transparency strip: a checkerboard with the chosen filament's colour fading
+   out across it. This is the one slider whose value can be drawn rather than
+   named, so it is -- the number stays beside it, but the strip answers "how
+   transparent" without being read.
+
+   The checkerboard is a repeating gradient pair rather than an image: it has to
+   sit under a colour that changes on every drag, and a background image cannot be
+   recoloured without being regenerated. */
+[data-model3d-viewer] .m3d-picker-transparency {
+  margin-top: 9px;
+}
+[data-model3d-viewer] .m3d-picker-transparency .m3d-slider {
+  width: 100%;
+}
+/* No label: the strip and the colour above it are the label. The value is a field
+   rather than a number, so it is sized to hold three digits and carries the
+   percentage sign as a background glyph -- an input cannot contain static text. */
+[data-model3d-viewer] .m3d-picker-transparency .m3d-slider-value {
+  flex: 0 0 auto;
+  width: 30px;
+  text-align: right;
+}
+[data-model3d-viewer] .m3d-slider-number {
+  appearance: none;
+  height: 20px;
+  padding: 0 3px;
+  border: none;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  box-sizing: border-box;
+  cursor: text;
+}
+[data-model3d-viewer] .m3d-slider-number:focus {
+  box-shadow: 0 0 0 1px var(--m3d-accent-line);
+}
+[data-model3d-viewer] .m3d-slider-tone-box {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  /* The hue strip's own thickness, because the two are the same kind of object --
+     a bar of colour you drag along. They sit three rows apart in one popover, and
+     two bars of different weight read as two unrelated controls. */
+  height: 14px;
+  display: flex;
+  align-items: center;
+}
+/* The strip itself, behind the range: the colour solid at the transparent end and
+   gone at the other, over a checker so "gone" reads as gone rather than as the
+   popover's own background. */
+[data-model3d-viewer] .m3d-slider-tone {
+  position: absolute;
+  inset: 0;
+  /* The hue strip's radius, and its inset ring: the ring is what keeps a pale
+     filament's strip from bleeding into a pale popover, exactly as it does for the
+     top of the hue strip against the white corner of the square. */
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.14);
+  /* The colour and its level come from script, because both change as the thumb
+     moves; the checkerboard underneath is this sheet's. */
+  background-size: 100% 100%, 7px 7px, 7px 7px;
+  background-position: 0 0, 0 0, 3.5px 3.5px;
+  pointer-events: none;
+}
+/* The range sits on top of the strip and is transparent itself, so the picture
+   shows through and only the thumb is drawn. */
+[data-model3d-viewer] .m3d-slider.is-alpha input[type="range"] {
+  position: relative;
+  width: 100%;
+  height: 14px;
+  background: transparent;
+  border-radius: 4px;
+}
+[data-model3d-viewer] .m3d-slider.is-alpha input[type="range"]::-webkit-slider-thumb {
+  width: 11px;
+  height: 11px;
+  /* A ring rather than a disc: the colour under the thumb is the point of the
+     strip, and a filled thumb would hide the one sample that matters. */
+  background: transparent;
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.6);
+}
 
 [data-model3d-viewer] .m3d-picker-actions {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-top: 10px;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  background: #202124;
+  padding-top: 4px;
 }
 [data-model3d-viewer] .m3d-picker-spacer { flex: 1 1 auto; }
 
@@ -460,15 +597,15 @@ const CSS = `
   height: 26px;
   padding: 0 12px;
   border-radius: 3px;
-  border: 1px solid var(--m3d-hairline-strong);
-  background: transparent;
+  border: none;
+  background: rgba(255, 255, 255, 0.07);
   color: var(--m3d-text);
   font-family: var(--m3d-mono);
   font-size: 10px;
   cursor: pointer;
-  transition: background 120ms, border-color 120ms;
+  transition: background 120ms;
 }
-[data-model3d-viewer] .m3d-picker-button:hover { background: var(--m3d-hairline); }
+[data-model3d-viewer] .m3d-picker-button:hover { background: rgba(255, 255, 255, 0.14); }
 /* Accepting is the one filled control in the panel, and it is filled with the
    colour being chosen: the button is the largest sample of the result there is. */
 [data-model3d-viewer] .m3d-picker-button.is-primary {
@@ -782,7 +919,19 @@ const STYLE_MARKER = 'data-model3d-styles';
  */
 export function injectStyles(document) {
   const existing = document.querySelector(`style[${STYLE_MARKER}]`);
-  if (existing !== null) return existing;
+  if (existing !== null) {
+    // An existing sheet is not necessarily *this* sheet. A host that swaps the
+    // bundle without reloading the page -- a plugin reloaded in place, a HMR
+    // update, a second include of a newer build -- leaves the element from the
+    // previous version in the document, and returning it unchanged means every
+    // rule added since is silently missing. That is exactly what happened to the
+    // colour window: it mounted into a real panel with the previous build's
+    // stylesheet still in place, so it appeared as unstyled buttons and inputs
+    // inside a styled toolbar. Comparing the text is what makes the sheet follow
+    // the bundle it came from.
+    if (existing.textContent !== CSS) existing.textContent = CSS;
+    return existing;
+  }
   const style = document.createElement('style');
   style.setAttribute(STYLE_MARKER, '');
   style.textContent = CSS;

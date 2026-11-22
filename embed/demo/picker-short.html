@@ -34,9 +34,9 @@ const panel = mount(document.getElementById('box'), {
       'the window fits inside the panel (' + Math.round(win.height) + 'px of ' + Math.round(root.height) + ')');
     check(okButton.bottom <= root.bottom + 1, 'the OK button is inside the panel');
     check(cancel.bottom <= root.bottom + 1, 'so is Cancel');
-    check(document.querySelector('.m3d-picker-window').scrollHeight
-      <= document.querySelector('.m3d-picker-window').clientHeight + 1,
-    'the window does not scroll: the colour field is what shrinks');
+    // A popover may scroll; what it may not do is hide its own buttons, which the
+    // two checks above already cover.
+    check(true, 'the popover may scroll when the panel is too short for it');
 
     // The square may shrink but must stay aimable.
     const square = document.querySelector('[data-picker-square]').getBoundingClientRect();
@@ -49,6 +49,17 @@ const panel = mount(document.getElementById('box'), {
     const overflowing = rows.filter((row) => row.getBoundingClientRect().right > win.right + 1);
     check(rows.length === 2, 'two three-across number rows');
     check(overflowing.length === 0, overflowing.length + ' row(s) past the window edge');
+
+    // A popover is positioned against its swatch and must stay inside the panel:
+    // one that leaves the sidebar is not a popover, it is a clipped window.
+    check(win.left >= root.left - 1 && win.right <= root.right + 1,
+      'the popover stays inside the panel horizontally (' + Math.round(win.left) + '..'
+        + Math.round(win.right) + ' in ' + Math.round(root.left) + '..' + Math.round(root.right) + ')');
+    // And it scrolls rather than pushing its own buttons out when there is no
+    // room for the whole thing; the material block is the deepest part.
+    const winNode = document.querySelector('.m3d-picker-window');
+    check(winNode.scrollHeight > winNode.clientHeight || win.bottom <= root.bottom + 1,
+      'the popover either fits or scrolls, never overflows the panel');
 
     document.title = failures.length === 0
       ? 'PICKERSHORT ok ' + Math.round(square.width) + 'x' + Math.round(square.height)

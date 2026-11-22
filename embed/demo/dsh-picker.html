@@ -1,0 +1,168 @@
+<!doctype html><html><head><meta charset="utf-8"><title>dshpicker</title>
+<style>html,body{margin:0;background:#111214;color:#8a949c;font:11px monospace}
+#box{width:420px;height:520px}#log{padding:6px;white-space:pre;max-height:120px;overflow:auto}</style></head>
+<body><div id="log">start</div><div id="box"></div>
+<script>
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { log('ERR ' + e.message + ' @' + e.lineno); document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { const m = e.reason?.message ?? String(e.reason); log('REJ ' + m); document.title = 'REJ ' + m; });
+
+const registered = {};
+window.__ModuleLoader__ = { load({ id, factory }) { registered[id] = factory; } };
+
+const refs = []; let refIndex = 0;
+window.__react = {
+  createElement: (type, props, ...children) => ({ type, props: { ...props, children } }),
+  useRef(initial) { const i = refIndex++; refs[i] ??= { current: initial }; return refs[i]; },
+  useEffect(fn) { (window.__effects ??= []).push(fn); },
+};
+</script>
+<!-- The bug this page exists for, reproduced deliberately.
+
+     A host that swaps the bundle without reloading the page -- a plugin reloaded
+     in place, an HMR update, a second include of a newer build -- leaves the
+     previous build's <style> in the document. `injectStyles` used to return any
+     existing element unchanged, so the new panel mounted with the old rules: new
+     markup, old CSS. In the real sidebar that looked like a colour window with
+     no layout at all, sitting at the bottom of the panel, while the toolbar and
+     the layer slider beside it were styled normally -- which is the tell, because
+     they come from the same sheet.
+
+     So: plant a style element under the real marker with content that predates
+     the colour window, then load the bundle. The page asserts the window ends up
+     styled anyway. On the previous build this reads UNSTYLED. -->
+<script>
+  const stale = document.createElement('style');
+  stale.setAttribute('data-model3d-styles', '');
+  stale.textContent = '[data-model3d-viewer]{display:flex}';
+  document.head.append(stale);
+  document.title = 'dshpicker';
+</script>
+<script type="module">
+import { parseModel } from '../dist/model3d-viewer.mjs';
+globalThis.__parseModel = parseModel;
+</script>
+<script>
+// The same bundle the sidebar loads, through the same loader shim, on the same
+// kind of page: this is the closest thing to the real GUI that can be run
+// headless. What it reports is whether the window's stylesheet rules exist and
+// whether they are the rules being applied to the nodes.
+window.addEventListener('load', () => {
+  const factory = registered['model3d-viewer'];
+  if (!factory) { document.title = 'NO FACTORY'; return; }
+  const plugin = factory((name) => {
+    if (name === 'react') return window.__react;
+    throw new Error('unexpected require: ' + name);
+  });
+
+  const slots = [];
+  const ctx = {
+    locale: { bind: () => (key) => key, register: () => () => {} },
+    sidebarRightTabs: { register: () => () => {} },
+    slots: {
+      inject: (slot, fn) => fn(),
+      register: (def, component) => { slots.push({ slot: def.name, component }); return () => {}; },
+    },
+    remote: { workspaceFiles: { readBytes: async () => ({ ok: false, error: { message: 'stub' } }) } },
+    effect: (fn) => { const d = fn(); return d; },
+  };
+  plugin.apply(ctx);
+
+  const body = slots.find((s) => s.slot === 'sidebar.right.pane.tab');
+  if (!body) { document.title = 'NO BODY'; return; }
+  const injected = {
+    readModel: async () => {
+      const res = await fetch('./fixtures/sliced.3mf');
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      const parsed = globalThis.__parseModel('part.3mf', bytes);
+      return parsed.sliced !== undefined ? parsed : { mesh: parsed };
+    },
+    locales: { en: {}, ru: {} },
+  };
+  const element = body.component({
+    useTabInfo: () => ({ tab: { contentId: 'dsh-resource://file/session/sess/fixtures/sliced.3mf' } }),
+    t: (k) => k,
+    ...injected,
+  });
+  const host = document.getElementById('box');
+  const domNode = document.createElement(element.type);
+  host.append(domNode);
+  refs[0].current = domNode;
+  for (const fn of (window.__effects ?? [])) fn();
+
+  setTimeout(async () => {
+    const panel = window.__panel;
+    // --- what the document actually contains ---------------------------------
+    const sheets = [...document.querySelectorAll('style')];
+    log('style elements: ' + sheets.length);
+    const css = sheets.map((s) => s.textContent).join('\n');
+    log('css bytes: ' + css.length);
+    log('css has .m3d-picker-window: ' + css.includes('.m3d-picker-window'));
+    log('stale sheet was replaced: ' + (css.length > 1000));
+    log('css has .m3d-layer-groove: ' + css.includes('.m3d-layer-groove'));
+    log('css has .m3d-swatch: ' + css.includes('.m3d-swatch'));
+
+    // --- is a rule for the window actually matched? --------------------------
+    const matched = [...document.styleSheets].flatMap((sheet) => {
+      try { return [...sheet.cssRules].map((r) => r.selectorText ?? ''); } catch { return ['<blocked>']; }
+    }).filter((s) => s.includes('m3d-picker'));
+    log('rules matching m3d-picker: ' + matched.length + (matched.length ? ' e.g. ' + matched[0] : ''));
+
+    const root = document.querySelector('[data-model3d-viewer]');
+    log('panel root present: ' + (root !== null));
+    if (root === null) { document.title = 'NO ROOT'; return; }
+    log('root position: ' + getComputedStyle(root).position);
+
+    // The swatches are only editable in material mode: plain shading has no
+    // highlight to tune, so `openPicker` refuses. Switching first is setup.
+    //
+    // Found by its title, not by "the first button with aria-pressed": the
+    // segmented Model button has that attribute too, and picking it switched the
+    // view instead of the lighting. The window then never opened, and an earlier
+    // version of this page still reported "styled" -- computed styles resolve for
+    // a hidden element, so the check was passing on a window that did not exist.
+    const lightingButton = [...root.querySelectorAll('.m3d-btn')]
+      .find((b) => (b.title ?? '').includes('lighting'));
+    log('lighting button: ' + (lightingButton === undefined ? 'NOT FOUND' : lightingButton.title));
+    lightingButton?.click();
+    await new Promise((r) => setTimeout(r, 400));
+    log('plain lighting now: ' + window.__panel?.state.plainLighting);
+
+    // Open the window the way a user does: press a swatch.
+    const swatches = [...root.querySelectorAll('.m3d-palette .m3d-swatch')];
+    log('swatches: ' + swatches.length);
+    if (swatches.length === 0) { document.title = 'NO SWATCH: ' + document.title; return; }
+    swatches[0].click();
+    await new Promise((r) => setTimeout(r, 300));
+
+    const picker = document.querySelector('[data-model3d-picker]');
+    log('picker present: ' + (picker !== null));
+    if (picker === null) { document.title = 'NO PICKER'; return; }
+    const cs = getComputedStyle(picker);
+    log('picker position: ' + cs.position + ' zIndex: ' + cs.zIndex + ' display: ' + cs.display);
+    log('picker background: ' + cs.backgroundColor);
+    const win = document.querySelector('.m3d-picker-window');
+    const wcs = win === null ? null : getComputedStyle(win);
+    log('window width: ' + (wcs === null ? 'n/a' : wcs.width + ' display=' + wcs.display + ' bg=' + wcs.backgroundColor));
+    log('window height: ' + (win === null ? 'n/a' : Math.round(win.getBoundingClientRect().height)));
+    const square = document.querySelector('[data-picker-square]');
+    log('square bg-image: ' + (square === null ? 'n/a' : String(getComputedStyle(square).backgroundImage).slice(0, 40)));
+    const hexRow = document.querySelector('.m3d-picker-hex-row');
+    log('hexRow class applied via CSS: ' + (hexRow === null ? 'n/a' : getComputedStyle(hexRow).borderTopWidth));
+
+    // A window counts as styled only when it is actually open and laid out. The
+    // hidden case still resolves every computed style, which is how a check on
+    // `position: absolute` alone passed on a window with height 0.
+    const shown = picker.hidden === false
+      && win.getBoundingClientRect().height > 80
+      && cs.position === 'absolute'
+      && wcs.backgroundColor !== 'rgba(0, 0, 0, 0)'
+      && wcs.display === 'flex';
+    log('window is open and laid out: ' + shown);
+    document.title = shown ? 'DSHPICKER styled' : 'DSHPICKER UNSTYLED';
+    log('verdict: ' + document.title);
+  }, 2500);
+});
+</script>
+<script src="../../client.js"></script>
+</body></html>

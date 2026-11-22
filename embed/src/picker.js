@@ -123,9 +123,15 @@ const HUE_STOPS = [0, 60, 120, 180, 240, 300, 360]
  * opening would be work for nothing -- and would drop the pointer capture of a
  * drag that is still in flight.
  *
- * The screen it returns fills the panel's own box rather than the page. A modal
- * that escaped the sidebar into the whole application would dim somebody else's
- * editor to ask about one filament.
+ * It is a popover, not a modal: it opens under the swatch that was clicked, it
+ * does not dim the scene, and the plate stays visible while the colour is chosen.
+ * A filament is judged against the print, so covering the print to ask about it --
+ * with a scrim and a centred dialog -- was working against the one thing the
+ * window exists to show.
+ *
+ * The filament's material belongs here too. Matte, metalness and transparency are
+ * judged the same way as the colour and against the same object, so they sit under
+ * it in the same window rather than in a separate row above the canvas.
  */
 export class ColorPickerControl {
   /**
@@ -137,9 +143,17 @@ export class ColorPickerControl {
    * @param onCommit - called with the final hex when the window is accepted.
    * @param onCancel - called when it is dismissed without accepting.
    */
-  constructor({ t, document, host, onPreview, onCommit, onCancel }) {
+  constructor({ t, document, host, transparency, surface, onPreview, onCommit, onCancel }) {
     this.t = t;
     this.document = document;
+    /**
+     * The transparency slider, seated with the colour: it fades that colour out.
+     * The control rather than its node, because its track is repainted with the
+     * colour being chosen and that is the control's own method.
+     */
+    this.transparency = transparency;
+    /** The rest of the filament's material, owned by the panel and seated here. */
+    this.surface = surface;
     this.onPreview = onPreview;
     this.onCommit = onCommit;
     this.onCancel = onCancel;
@@ -271,10 +285,15 @@ export class ColorPickerControl {
         }, icon('close')),
       ]),
       el('div', { class: 'm3d-picker-body' }, [this.hue, this.square]),
+      el('div', { class: 'm3d-picker-transparency', 'data-picker-transparency': true },
+        this.transparency === undefined ? null : this.transparency.node),
       this.hexRow,
       el('div', { class: 'm3d-picker-fields is-three' }, this.rgbFields),
       el('div', { class: 'm3d-picker-fields is-three' }, this.hsvFields),
       this.presets,
+      // The filament's material, seated by the panel. Skipped when the panel has
+      // none to offer, so the window still works on its own.
+      this.surface ?? null,
       el('div', { class: 'm3d-picker-actions' }, [
         this.eyedropper,
         el('span', { class: 'm3d-picker-spacer' }),
@@ -283,15 +302,12 @@ export class ColorPickerControl {
       ]),
     ]);
 
+    // The node is the popover: positioned against the swatch that opened it, with
+    // no scrim around it and nothing between it and the scene.
     this.node = el('div', {
       class: 'm3d-picker',
       'data-model3d-picker': true,
       hidden: true,
-      // Clicking the screen itself dismisses: the window is a modal, and every
-      // other modal on the platform does the same. The window stops the event.
-      onPointerDown: (event) => {
-        if (event.target === this.node) this.close(true);
-      },
     }, [this.window]);
 
     this.watchSquare();
@@ -485,7 +501,7 @@ export class ColorPickerControl {
    * @param palette - the file's palette, for the copy-from row.
    * @param label - what is being edited, shown in the head.
    */
-  show(hex, palette, label) {
+  show(hex, palette, label, anchor) {
     const rgb = hexToChannels(hex) ?? [0, 0, 0];
     this.original = channelsToHex(rgb);
     // A stored black or grey carries no hue, and opening the window on red for a
@@ -498,8 +514,61 @@ export class ColorPickerControl {
     this.node.hidden = false;
     this.open = true;
     this.returnFocus = this.document.activeElement;
+    // Placed after it is visible: every measurement below is zero while hidden.
+    this.place(anchor);
     this.window.focus?.();
+    this.dismiss = (event) => {
+      // A click anywhere outside closes, which is what a popover does. The check
+      // is on `contains` rather than on the target alone: the swatch itself must
+      // not count as "outside", or opening from a swatch would immediately close.
+      if (!this.node.contains(event.target)) this.close(true);
+    };
+    // Deferred by a turn: the click that opened the popover is still being
+    // dispatched, and a listener added during it would receive that same event
+    // with the swatch as its target and close at once.
+    this.dismissHandle = this.document.defaultView?.setTimeout(() => {
+      this.document.addEventListener('pointerdown', this.dismiss, true);
+    }, 0);
     return this;
+  }
+
+  /**
+   * Put the popover under its swatch, inside the panel's box.
+   *
+   * Anchored rather than centred, because the swatch is the thing the user just
+   * clicked and the window should look like it came out of it. Two adjustments
+   * matter and both are geometry, not taste: the popover is aligned to the right
+   * edge when the swatch is far enough right that opening leftwards would push it
+   * out, and it opens upwards when there is not enough room below. A popover that
+   * leaves the sidebar is not a popover, it is a clipped window.
+   */
+  place(anchor) {
+    const host = this.node.parentElement;
+    if (host === null) return;
+    const hostBox = host.getBoundingClientRect();
+    const box = this.node.getBoundingClientRect();
+    const gap = 6;
+    const margin = 8;
+
+    let left = margin;
+    let top = margin;
+    if (anchor !== undefined && anchor !== null) {
+      const a = anchor.getBoundingClientRect();
+      left = a.left - hostBox.left;
+      // The swatch is small; centre the popover on it, then pull it back inside.
+      left = Math.min(left, hostBox.width - box.width - margin);
+      left = Math.max(margin, left);
+      const below = a.bottom - hostBox.top + gap;
+      const above = a.top - hostBox.top - box.height - gap;
+      // Below if it fits, above if that is where the room is, and pinned inside
+      // the panel when neither side fits -- which is the short-sidebar case.
+      if (below + box.height <= hostBox.height - margin) top = below;
+      else if (above >= margin) top = above;
+      else top = Math.max(margin, Math.min(below, hostBox.height - box.height - margin));
+    }
+    this.node.style.left = `${Math.round(left)}px`;
+    this.node.style.top = `${Math.round(top)}px`;
+    this.node.style.maxHeight = `${Math.round(hostBox.height - margin * 2)}px`;
   }
 
   /** Fill the preset row from the file's palette. */
@@ -546,6 +615,14 @@ export class ColorPickerControl {
     this.open = false;
     this.drag = null;
     this.node.hidden = true;
+    if (this.dismiss !== undefined) {
+      this.document.removeEventListener('pointerdown', this.dismiss, true);
+      this.dismiss = undefined;
+    }
+    if (this.dismissHandle !== undefined) {
+      this.document.defaultView?.clearTimeout(this.dismissHandle);
+      this.dismissHandle = undefined;
+    }
     const hex = this.hex();
     // Focus goes back where it came from: a keyboard user opened this from a
     // swatch, and dropping the focus on the body would lose their place.

@@ -325,6 +325,27 @@ const CHECKS = [
     pixels: { minColours: 16, minNonBackground: 0.01 },
   },
   {
+    // The colour window arrived in the sidebar as new markup wearing the previous
+    // build's stylesheet: plain buttons and text inputs at the bottom of the panel,
+    // while the toolbar and the layer slider beside it were styled normally. The
+    // tell is that both come from one sheet, so the sheet itself was old.
+    //
+    // `injectStyles` returned any existing <style> under its marker without ever
+    // updating it. A host that swaps the bundle without reloading the page -- a
+    // plugin reloaded in place, an HMR update, a second include of a newer build --
+    // leaves the previous element in the document, so every rule added since is
+    // silently missing. The page plants exactly that stale sheet, loads the real
+    // `client.js` through the DSH loader shim, and asserts the window is styled
+    // anyway. It reads UNSTYLED on the previous build.
+    name: 'dsh: a swapped bundle replaces a stale stylesheet',
+    page: 'dsh-picker.html',
+    size: [460, 680],
+    needs: 'sliced.3mf',
+    expect: /DSHPICKER styled/,
+    reject: /ERR|REJ|UNSTYLED|NO PICKER|NO ROOT/,
+    pixels: { minColours: 16, minNonBackground: 0.01 },
+  },
+  {
     // A sidebar is short, and a modal that pushes its own OK button off the bottom
     // is worse than no modal. Run at 260x330, which is smaller than any real
     // sidebar: the window has to give way inside itself -- the colour field is the

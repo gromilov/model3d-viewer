@@ -35,19 +35,39 @@ const panel = mount(document.getElementById('box'), {
     check(bare.length === 0, bare.length === 0 ? 'every button has an icon'
       : 'buttons without an icon: ' + bare.map((b) => b.title).join(', '));
 
-    // 2. material mode shows four labelled sliders, each with a number
+    // 2. material mode offers the filament's sliders, each with a value. They are
+    //    seated in the colour popover now rather than in a strip above the canvas,
+    //    so they are counted once it is open -- and the count is four across the
+    //    whole popover: transparency with the colour, matte, metalness and light
+    //    in the block below.
     panel.togglePlainLighting();
     await sleep(250);
-    const sliders = [...document.querySelectorAll('.m3d-surface-row .m3d-slider')];
-    check(sliders.length === 4, 'four surface sliders, got ' + sliders.length);
-    const blank = sliders.filter((s) => (s.querySelector('.m3d-slider-value')?.textContent ?? '') === '');
+    check(panel.state.plainLighting === false, 'material mode is on');
+    // The strip that used to hold them is gone from the panel entirely.
+    check(document.querySelector('.m3d-surface-row') === null,
+      'the old surface strip is gone from above the canvas');
+    panel.openPicker(0);
+    await sleep(250);
+    const sliders = [...document.querySelectorAll('.m3d-picker-window .m3d-slider')];
+    check(sliders.length === 4, 'four sliders in the window (transparency, matte, metalness, light), got ' + sliders.length);
+    // A value is either text or, for the typeable percentage, an input.
+    const blank = sliders.filter((s) => {
+      const value = s.querySelector('.m3d-slider-value');
+      if (value === null) return true;
+      return value.tagName === 'INPUT' ? value.value === '' : value.textContent === '';
+    });
     check(blank.length === 0, blank.length === 0 ? 'every slider shows its value'
       : 'sliders with no value: ' + blank.length);
+    panel.picker.close(true);
+    await sleep(150);
 
     // 3. the panel knows the scene's materials, not an empty array
     check(Array.isArray(panel.state.surfaces) && panel.state.surfaces.length > 0,
       'panel state carries ' + (panel.state.surfaces?.length ?? 0) + ' filament surface(s)');
-    const shown = Number(sliders[0]?.querySelector('.m3d-slider-value')?.textContent);
+    // The matte slider is the first in the material block; the block is the one
+    // that was hidden above the canvas and is now inside the popover.
+    const matte = [...panel.surfaceRow.querySelectorAll('.m3d-slider')][0];
+    const shown = Number(matte?.querySelector('.m3d-slider-value')?.textContent);
     const actual = Math.round((panel.state.surfaces[0]?.matte ?? 0) * 100);
     check(shown === actual, 'matte slider shows ' + shown + ', scene says ' + actual);
 
@@ -55,11 +75,16 @@ const panel = mount(document.getElementById('box'), {
     check(panel.resetButton.disabled === false, 'reset button is enabled after loading');
     check(panel.loading === false, 'loading flag cleared');
 
-    // 5. at this width the row wraps rather than hiding a slider off the edge
-    const row = document.querySelector('.m3d-surface-row');
-    const clipped = sliders.filter((s) => s.getBoundingClientRect().right > row.getBoundingClientRect().right + 1);
-    check(clipped.length === 0, clipped.length === 0 ? 'no slider is clipped off the row'
+    // 5. at this width nothing in the popover is clipped off its edge
+    panel.openPicker(0);
+    await sleep(250);
+    const win = document.querySelector('.m3d-picker-window').getBoundingClientRect();
+    const clipped = [...document.querySelectorAll('.m3d-picker-window .m3d-slider')]
+      .filter((s) => s.getBoundingClientRect().right > win.right + 1);
+    check(clipped.length === 0, clipped.length === 0 ? 'no slider is clipped off the window'
       : clipped.length + ' slider(s) past the right edge');
+    panel.picker.close(true);
+    await sleep(150);
 
     document.title = failures.length === 0 ? 'PANELCHECK ok' : 'FAIL ' + failures.join('; ');
   },

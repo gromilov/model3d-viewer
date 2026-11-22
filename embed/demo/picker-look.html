@@ -11,6 +11,9 @@ const panel = mount(document.getElementById('box'), {
     await new Promise((r) => setTimeout(r, 600));
     panel.togglePlainLighting();
     await new Promise((r) => setTimeout(r, 300));
+    // A filament with some transparency, so the strip shows a faded colour.
+    panel.selectSlot(1);
+    panel.setSurface(1, { transparency: 0.55 });
     panel.openPicker(1);
     await new Promise((r) => setTimeout(r, 300));
     document.title = 'SHOT';

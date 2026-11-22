@@ -511,7 +511,7 @@ export class ViewerPanel {
       this.statsNode,
     ]);
 
-    // --- surface row (material mode only) --------------------------------
+    // --- the filament's material, seated in the colour popover -----------
     this.matteSlider = new SliderControl({
       t,
       labelKey: 'controls.matte',
@@ -534,7 +534,18 @@ export class ViewerPanel {
       min: 0,
       max: 1,
       step: 0.02,
-      onChange: (value) => this.setSurface(this.state.activeSlot, { transparency: value }),
+      // The one slider whose meaning can be drawn: it fades a colour out. Its
+      // label is dropped and its value is typeable, because the strip and the
+      // colour square above it already say what the row is for, and "exactly
+      // forty percent" is a number people know rather than nudge towards.
+      tone: 'alpha',
+      hideLabel: true,
+      editable: true,
+      onChange: (value) => {
+        this.setSurface(this.state.activeSlot, { transparency: value });
+        // The strip is a picture of this very value, so it follows the drag.
+        this.syncTransparencyTone();
+      },
     });
     // The studio's own level, separate from any filament: how bright the light
     // is, not how a material answers it.
@@ -546,13 +557,19 @@ export class ViewerPanel {
       step: 0.05,
       onChange: (value) => this.setLightLevel(value),
     });
-    this.surfaceRow = el('div', { class: 'm3d-surface-row' }, [
+    // Grouped, and only the slider's own hit area: this block sits inside a
+    // popover narrower than the row it came from.
+    // Transparency sits with the colour rather than with the material: it is what
+    // the colour does to the light behind it, and it is the one slider that reads
+    // against the swatch it belongs to. Matte, metalness and the light level are
+    // judged on the surface, so they stay in the block below.
+    this.transparencyRow = el('div', { class: 'm3d-picker-transparency', 'data-picker-transparency': true });
+
+    this.surfaceRow = el('div', { class: 'm3d-picker-surface', 'data-picker-surface': true }, [
       this.matteSlider.node,
       this.metalnessSlider.node,
-      this.transparencySlider.node,
       this.lightSlider.node,
     ]);
-    this.surfaceRow.hidden = true;
 
     // --- stage -----------------------------------------------------------
     this.stage = el('div', { class: 'm3d-stage' });
@@ -563,7 +580,7 @@ export class ViewerPanel {
     this.layerSlider = null;
     this.navCube = null;
 
-    append(this.root, [this.toolbar, this.surfaceRow, this.stage]);
+    append(this.root, [this.toolbar, this.stage]);
 
     // The colour window, built with the panel and mounted into its root, hidden
     // until a swatch is clicked. Created here rather than lazily on first use so
@@ -573,6 +590,8 @@ export class ViewerPanel {
       t,
       document: this.document,
       host: this.root,
+      transparency: this.transparencySlider,
+      surface: this.surfaceRow,
       onPreview: (hex) => this.previewFilament(hex),
       onCommit: (hex) => this.commitFilament(hex),
       onCancel: (hex) => this.cancelFilament(hex),
@@ -1229,6 +1248,9 @@ export class ViewerPanel {
       palette[slot],
       palette,
       `${this.t('controls.surfaceFor')} ${slot + 1}`,
+      // The swatch it opens under, so the popover comes out of the thing that was
+      // clicked rather than appearing somewhere in the panel.
+      this.paletteControl.node.children[slot],
     );
     this.paletteControl.setActive(slot);
   }
@@ -1243,8 +1265,16 @@ export class ViewerPanel {
    */
   previewFilament(hex) {
     if (this.pickerSlot === undefined) return;
-    // Coalesced to one frame. A drag across the square reports a move per few
-    // pixels, and each one means "recolour the plate": the engine answers a
+    // Recorded at once, and used to draw the strip below: `palette()` rebuilds its
+    // array from the file's colours plus the committed overrides on every call, so
+    // a preview living only in a local copy of it is forgotten by the next reader.
+    // That is why the transparency strip kept the old colour while the plate and
+    // the swatch changed -- it asks `palette()`, which had never heard of the
+    // preview.
+    this.previewColour = { slot: this.pickerSlot, hex };
+    this.syncTransparencyTone();
+    // The upload is coalesced to one frame. A drag across the square reports a move
+    // per few pixels, and each one means "recolour the plate": the engine answers a
     // palette change with a uniform upload and a draw, so a synchronous preview
     // would queue several full redraws per frame and show one. The same bug was
     // fixed for camera drags; the colour window is the other place a pointer
@@ -1260,6 +1290,22 @@ export class ViewerPanel {
       this.viewer?.setPalette(palette);
       this.paletteControl.setColour(pending.slot, pending.hex);
     });
+  }
+
+  /**
+   * The colour a slot is showing right now.
+   *
+   * The committed palette, unless the colour window is open on that slot and has
+   * previewed something the user has not accepted yet -- in which case that is
+   * what the user sees on the plate, so it is what the controls beside it must
+   * show too.
+   */
+  colourOf(slot) {
+    const palette = this.palette();
+    if (palette === undefined) return undefined;
+    const preview = this.previewColour;
+    if (preview !== undefined && preview.slot === slot) return preview.hex;
+    return palette[slot];
   }
 
   /**
@@ -1309,6 +1355,7 @@ export class ViewerPanel {
   commitFilament(hex) {
     const slot = this.pickerSlot;
     this.pickerSlot = undefined;
+    this.previewColour = undefined;
     if (slot === undefined) return;
     this.setFilament(slot, hex);
   }
@@ -1317,6 +1364,7 @@ export class ViewerPanel {
   cancelFilament() {
     const slot = this.pickerSlot;
     this.pickerSlot = undefined;
+    this.previewColour = undefined;
     if (slot === undefined) return;
     const { paletteOverrides } = this.state;
     // Cancel has to be able to restore "no override", which is a different state
@@ -1448,9 +1496,10 @@ export class ViewerPanel {
     this.saveTracedButton.hidden = !state.tracing;
     this.saveTracedButton.disabled = !state.tracing || state.exportingTrace === true;
 
-    // The surface row is only shown in material mode: plain shading has no
-    // highlight to tune and no reflection to weaken.
-    this.surfaceRow.hidden = state.plainLighting || !ready;
+    // The material controls ride in the colour popover now, so they are shown and
+    // hidden with it rather than occupying a strip of the panel. Only the light
+    // level is not per filament, and it stays in the same block because it is
+    // judged in the same place: while looking at the print.
 
     // Without material sliders there is nothing to select a filament for, so the
     // swatches stay a legend in plain mode.
@@ -1519,6 +1568,10 @@ export class ViewerPanel {
       palette,
       this.state.plainLighting ? undefined : this.state.activeSlot,
     );
+    // The transparency strip is drawn in the filament's colour, so it follows the
+    // palette wherever the palette goes -- including back, when a colour window is
+    // cancelled. Every caller of this method is a moment the colour changed.
+    this.syncTransparencyTone();
   }
 
   /** Reflect the bed button's availability. */
@@ -1577,6 +1630,21 @@ export class ViewerPanel {
     this.metalnessSlider.setValue(surface.metalness);
     this.transparencySlider.setValue(surface.transparency);
     this.lightSlider.setValue(state.lightLevel);
+    this.syncTransparencyTone();
+  }
+
+  /**
+   * Repaint the transparency strip from the colour and level in force.
+   *
+   * Two sources feed it -- the palette, which supplies the colour, and the surface,
+   * which supplies the level -- so it is refreshed from both rather than from
+   * whichever changed last.
+   */
+  syncTransparencyTone() {
+    const colour = this.colourOf(this.state.activeSlot);
+    if (colour === undefined) return;
+    const surface = this.state.surfaces[this.state.activeSlot] ?? DEFAULT_SURFACE;
+    this.transparencySlider.setTone(colour, surface.transparency);
   }
 
   /* ------------------------------------------------------------- teardown -- */
@@ -1604,11 +1672,24 @@ export class ViewerPanel {
 
 /** One labelled slider for a surface property. */
 class SliderControl {
-  constructor({ t, labelKey, min, max, step, onChange }) {
+  /**
+   * @param options - the usual range description, plus three refinements:
+   *   `tone: 'alpha'` draws a colour ramp behind the range; `editable` turns the
+   *   number beside it into a field; `hideLabel` drops the text label, for a row
+   *   whose subject is already obvious from the strip it carries.
+   */
+  constructor({ t, labelKey, min, max, step, onChange, tone, editable = false, hideLabel = false }) {
     this.t = t;
     this.labelKey = labelKey;
     const label = t(labelKey);
-    this.valueNode = el('span', { class: 'm3d-slider-value' });
+    this.min = min;
+    this.max = max;
+    this.onChange = onChange;
+    // The label survives as the accessible name even when it is not drawn: a
+    // control with no text still has to announce what it sets.
+    this.valueNode = editable
+      ? this.percentField(label, onChange)
+      : el('span', { class: 'm3d-slider-value' });
     this.input = el('input', {
       type: 'range',
       min: String(min),
@@ -1617,16 +1698,130 @@ class SliderControl {
       'aria-label': label,
       onInput: (event) => {
         const value = Number(event.target.value);
-        this.valueNode.textContent = String(Math.round(value * 100));
+        if (this.valueNode.tagName === 'INPUT') {
+          // Not while it is being typed into: rewriting a field mid-word moves the
+          // caret, and the field's own text is the user's until they commit it.
+          if (this.valueNode !== this.valueNode.ownerDocument.activeElement) {
+            this.valueNode.value = String(Math.round(value * 100));
+          }
+        } else {
+          this.valueNode.textContent = String(Math.round(value * 100));
+        }
         onChange(value);
       },
     });
     this.input.value = String(min);
-    this.node = el('label', { class: 'm3d-slider', title: label }, [
-      el('span', { class: 'm3d-slider-label' }, label),
-      this.input,
+    // A "tone" slider carries a picture of its own subject behind the range: the
+    // transparency one shows the filament's colour fading to nothing over a
+    // checkerboard, so the number has something to be a number *about*. The other
+    // sliders are percentages of a quality, which no strip can draw.
+    this.track = tone === 'alpha' ? el('span', { class: 'm3d-slider-tone' }) : null;
+    const control = this.track === null
+      ? this.input
+      : el('span', { class: 'm3d-slider-tone-box' }, [this.track, this.input]);
+    // A label element is right for a slider (clicking the text focuses it) but
+    // wrong once the value is a field itself: a label wrapping an input sends its
+    // clicks to the first focusable child, which would be the range rather than
+    // the number the user is trying to reach. So a row with an editable value is a
+    // plain span, with the range's own aria-label carrying the name.
+    this.node = el(editable ? 'span' : 'label', {
+      class: `m3d-slider${this.track === null ? '' : ' is-alpha'}`,
+      title: label,
+    }, [
+      hideLabel ? null : el('span', { class: 'm3d-slider-label' }, label),
+      control,
       this.valueNode,
     ]);
+  }
+
+  /**
+   * The value as a field you can type into.
+   *
+   * A slider is good for "a bit more" and bad for "exactly forty": a 54-pixel
+   * range over 0..100 moves in steps of about two, so a number that the panel will
+   * store with two decimals can only be reached by nudging. Typing is the answer
+   * for the value someone already knows.
+   *
+   * Committed on Enter, on blur and on the arrow keys' own input events; anything
+   * unparseable is reverted rather than clamped to zero, because a typo should not
+   * silently set the filament solid.
+   */
+  percentField(label, onChange) {
+    const field = el('input', {
+      class: 'm3d-slider-value m3d-slider-number',
+      type: 'text',
+      spellcheck: 'false',
+      autocomplete: 'off',
+      inputmode: 'numeric',
+      'aria-label': label,
+      onInput: (event) => {
+        const text = event.target.value.trim();
+        if (!/^\d{1,3}$/.test(text)) return;
+        const value = this.clamp(Number(text) / 100);
+        this.input.value = String(value);
+        onChange(value);
+      },
+      onBlur: () => this.syncNumber(),
+      onKeyDown: (event) => {
+        // Enter commits and leaves; Escape puts the field back as it was.
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          event.target.blur();
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          this.syncNumber();
+          event.target.blur();
+        }
+      },
+    });
+    field.value = '0';
+    return field;
+  }
+
+  /** Clamp a value into this slider's range. */
+  clamp(value) {
+    if (!Number.isFinite(value)) return this.min;
+    return Math.min(this.max, Math.max(this.min, value));
+  }
+
+  /** Write the current value into the number field, if there is one. */
+  syncNumber() {
+    if (this.valueNode.tagName !== 'INPUT') return;
+    this.valueNode.value = String(Math.round(Number(this.input.value) * 100));
+  }
+
+  /**
+   * Show a colour, at a transparency, in an alpha slider's track.
+   *
+   * The strip ramps across this filament's colour, solid at one end and gone at
+   * the other, over a checkerboard. That ramp is the shape the control is about,
+   * and it is drawn in the colour being edited rather than in a neutral grey, so
+   * the slider belongs to the filament it is setting.
+   *
+   * The first attempt drew the colour at the *current* level instead -- a flat
+   * fill. It was honest and unreadable: a pale filament at 55% is a nearly
+   * invisible wash over the checker, and the strip stopped saying which end meant
+   * what. A ramp says that without being read, and the thumb and the number
+   * already say where in it the value sits.
+   *
+   * @param hex - the filament's colour.
+   * @param transparency - 0 for solid, 1 for gone; kept for the caller's sake,
+   *   which knows the value, though the ramp itself does not depend on it.
+   */
+  setTone(hex, transparency = 0) {
+    if (this.track === null) return;
+    void transparency;
+    const rgb = hexToChannels(hex) ?? [0, 0, 0];
+    const channels = rgb.map((c) => Math.round(c * 255)).join(', ');
+    // A colour and its alpha in one declaration: a custom property cannot carry an
+    // alpha, and `color-mix` is newer than the browsers this ships to.
+    // The checkerboard is deliberately darker than the popover's own surface. A
+    // pale filament -- and half the filaments here are pale -- fading to a pale
+    // checker is a strip that looks like a solid bar; against a darker one the
+    // transparent end reads as empty whatever the colour is.
+    this.track.style.backgroundImage = `linear-gradient(to right, rgba(${channels}, 1), rgba(${channels}, 0)), `
+      + 'linear-gradient(45deg, #3c3c3c 25%, transparent 25%, transparent 75%, #3c3c3c 75%), '
+      + 'linear-gradient(45deg, #3c3c3c 25%, #161616 25%, #161616 75%, #3c3c3c 75%)';
   }
 
   /** Set the slider's position without firing its change handler. */
@@ -1636,6 +1831,12 @@ class SliderControl {
     // own value is authoritative while it has focus.
     if (this.input === this.input.ownerDocument.activeElement && this.input.matches(':active')) return;
     this.input.value = String(value);
+    const active = this.valueNode.ownerDocument.activeElement;
+    if (this.valueNode.tagName === 'INPUT') {
+      // Nor may a field being typed into be rewritten from underneath.
+      if (this.valueNode !== active) this.valueNode.value = String(Math.round(value * 100));
+      return;
+    }
     this.valueNode.textContent = String(Math.round(value * 100));
   }
 }
