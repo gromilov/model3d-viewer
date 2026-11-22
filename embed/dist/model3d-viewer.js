@@ -10335,11 +10335,60 @@ class ViewerPanel {
    */
   previewFilament(hex) {
     if (this.pickerSlot === undefined) return;
-    const palette = this.palette();
-    if (palette === undefined) return;
-    palette[this.pickerSlot] = hex;
-    this.viewer?.setPalette(palette);
-    this.paletteControl.setColour(this.pickerSlot, hex);
+    // Coalesced to one frame. A drag across the square reports a move per few
+    // pixels, and each one means "recolour the plate": the engine answers a
+    // palette change with a uniform upload and a draw, so a synchronous preview
+    // would queue several full redraws per frame and show one. The same bug was
+    // fixed for camera drags; the colour window is the other place a pointer
+    // produces a change faster than frames do.
+    this.previewPending = { slot: this.pickerSlot, hex };
+    this.previewHandle ??= this.frame(this.previewHandle, () => {
+      const pending = this.previewPending;
+      this.previewPending = undefined;
+      if (pending === undefined || this.pickerSlot === undefined) return;
+      const palette = this.palette();
+      if (palette === undefined) return;
+      palette[pending.slot] = pending.hex;
+      this.viewer?.setPalette(palette);
+      this.paletteControl.setColour(pending.slot, pending.hex);
+    });
+  }
+
+  /**
+   * Run a callback on the next frame, or soon after if no frame comes.
+   *
+   * `requestAnimationFrame` alone is not enough, and the reason is not exotic: a
+   * page that is not presenting -- a background tab, a headless run with no
+   * compositor -- never gets the callback at all. For the trace loop that was the
+   * difference between a slow image and a frozen one; here it would mean a preview
+   * that silently stops updating, which is a worse bug than the one the coalescing
+   * fixes, because the window still looks like it is working.
+   *
+   * Both are armed and the loser is cancelled. Arming both and letting both stand
+   * is the mistake that once made the trace loop count to 109 against a budget of
+   * 96: the abandoned one started a second chain beside the first.
+   */
+  frame(handle, run) {
+    if (handle !== undefined) return handle;
+    const view = this.document.defaultView;
+    if (view === undefined || view === null) return undefined;
+    let done = false;
+    const once = () => {
+      if (done) return;
+      done = true;
+      if (this.previewHandle !== undefined) {
+        view.cancelAnimationFrame?.(this.previewHandle.frame);
+        view.clearTimeout?.(this.previewHandle.timer);
+        this.previewHandle = undefined;
+      }
+      run();
+    };
+    const frame = typeof view.requestAnimationFrame === 'function'
+      ? view.requestAnimationFrame(once)
+      : undefined;
+    const timer = view.setTimeout(once, 40);
+    if (frame === undefined) return timer;
+    return { frame, timer };
   }
 
   /**

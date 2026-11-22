@@ -150,7 +150,28 @@ const panel = mount(document.getElementById('box'), {
     document.querySelectorAll('.m3d-picker-button')[0].click();
     await sleep(100);
 
-    // 9. The presets row offers the file's own palette, one button per filament.
+    // 9. A drag does not upload the palette once per pointer move. The camera drag
+    //    had exactly this bug and the fix is the same: coalesce to one frame. Read
+    //    as a count of uploads against a burst, because virtual time in this
+    //    harness makes every clock in the page report zero.
+    panel.openPicker(0);
+    await sleep(150);
+    const realSetPalette = panel.viewer.setPalette;
+    let uploads = 0;
+    panel.viewer.setPalette = (...args) => { uploads += 1; return realSetPalette(...args); };
+    const fieldDrag = document.querySelector('.m3d-picker-hex');
+    for (let step = 0; step < 40; step += 1) {
+      fieldDrag.value = '#' + (0x101010 * step + 0x10203).toString(16).padStart(6, '0').slice(-6);
+      fieldDrag.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    await sleep(200);
+    panel.viewer.setPalette = realSetPalette;
+    check(uploads > 0 && uploads < 40,
+      '40 colour changes cause ' + uploads + ' palette upload(s), not one per move');
+    document.querySelectorAll('.m3d-picker-button')[0].click();
+    await sleep(120);
+
+    // 10. The presets row offers the file's own palette, one button per filament.
     check(document.querySelectorAll('[data-picker-presets] .m3d-picker-preset').length === panel.palette().length,
       'the window offers the file\'s own palette to copy from');
     check(document.querySelectorAll('[data-picker-presets] button').length >= 1,
