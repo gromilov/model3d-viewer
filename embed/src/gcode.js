@@ -34,6 +34,61 @@ const DEFAULT_HEIGHT = 0.2;
 const SEGMENT_BUDGET = 500000;
 
 /**
+ * Budget for the device at hand.
+ *
+ * A phone's GPU falls over well before the desktop cap: every kept segment is a
+ * quad with an extruded-stroke shader, and a 350k-segment plate loses the WebGL
+ * context on Adreno-class hardware. The phone budget keeps the shell and drops
+ * dense infill, so the plate still reads right — just without the strokes the
+ * eye cannot separate at that size anyway.
+ */
+function segmentBudget() {
+  const nav = globalThis.navigator ?? {};
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(nav.userAgent ?? '');
+  if (!mobile) return SEGMENT_BUDGET;
+  const memory = Number(nav.deviceMemory ?? 4);
+  // Полная нарезка важнее экономии: 400k пропускают обычную плату целиком,
+  // а потолок остаётся страховкой для по-настоящему гигантских файлов.
+  return memory >= 8 ? 400000 : 350000;
+}
+
+/**
+ * Thin the plate evenly across layers.
+ *
+ * Dropping the shortest strokes globally is wrong on two counts: short strokes
+ * are exactly the small fillets and curved facets a reader looks at, and the
+ * cut lands unevenly across layers, so stepping through them looks broken.
+ * Keeping every k-th stroke *within each layer* preserves the shape of every
+ * layer and the small details along with it — the plate thins out uniformly
+ * instead of losing parts.
+ */
+function thinEvenly(segments, budget) {
+  const perLayer = new Map();
+  for (const segment of segments) {
+    const key = Math.round(segment.layerZ * 1000) / 1000;
+    const list = perLayer.get(key);
+    if (list) list.push(segment);
+    else perLayer.set(key, [segment]);
+  }
+  if (perLayer.size === 0) return segments;
+
+  const quota = Math.max(1, Math.floor(budget / perLayer.size));
+  const kept = [];
+  for (const list of perLayer.values()) {
+    if (list.length <= quota) {
+      kept.push(...list);
+      continue;
+    }
+    // Take evenly spaced strokes, always including the last one so the layer closes.
+    const step = list.length / quota;
+    for (let i = 0; i < quota; i += 1) {
+      kept.push(list[Math.min(list.length - 1, Math.floor(i * step))]);
+    }
+  }
+  return kept;
+}
+
+/**
  * Split a slicer's per-section `;KEY:value` marker.
  *
  * The slicers this reader targets write their running width and height as
@@ -287,11 +342,9 @@ export function parseGcode(text) {
   // Over budget, keep the longest strokes: they carry the visible shell, while
   // the dropped ones are the dense infill that reads as solid fill anyway.
   let kept = segments;
-  if (segments.length > SEGMENT_BUDGET) {
-    kept = segments
-      .slice()
-      .sort((a, b) => b.length - a.length)
-      .slice(0, SEGMENT_BUDGET);
+  const budget = segmentBudget();
+  if (segments.length > budget) {
+    kept = thinEvenly(segments, budget);
   }
 
   // One layer per distinct height, in print order.

@@ -1098,10 +1098,22 @@ export function createViewer(canvas) {
   // by the on-screen size.
   let renderingExport = false;
 
+  /**
+   * Backing-store ratio. Phones get 1.5 instead of 2.5: the stroke shader is
+   * fragment-bound, and on a 3x screen the difference between 2.5 and 1.5 is
+   * ~2.8x fewer shaded pixels — the difference between a plate that renders and
+   * one that loses the context.
+   */
+  const pixelRatio = () => {
+    const dpr = globalThis.devicePixelRatio ?? 1;
+    const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(globalThis.navigator?.userAgent ?? '');
+    return Math.min(dpr, mobile ? 1.5 : 2.5);
+  };
+
   /** Resize the backing store to the canvas's device-pixel size. */
   const resize = () => {
     if (renderingExport) return;
-    const ratio = Math.min(globalThis.devicePixelRatio ?? 1, 2.5);
+    const ratio = pixelRatio();
     const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
     const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
     if (canvas.width !== width || canvas.height !== height) {

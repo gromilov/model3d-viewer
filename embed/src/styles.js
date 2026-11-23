@@ -14,15 +14,17 @@
 
 const CSS = `
 [data-model3d-viewer] {
-  --m3d-accent: #118980;
-  --m3d-accent-soft: rgba(17, 137, 128, 0.16);
-  --m3d-accent-line: rgba(17, 137, 128, 0.45);
-  --m3d-surface: rgba(24, 25, 27, 0.78);
-  --m3d-surface-solid: #1c1d20;
-  --m3d-hairline: rgba(255, 255, 255, 0.10);
-  --m3d-hairline-strong: rgba(255, 255, 255, 0.18);
-  --m3d-text: #d6d8db;
-  --m3d-text-dim: rgba(214, 216, 219, 0.52);
+  /* Тема Ткани: янтарь на угле. Раньше здесь был бирюзовый #118980 — он
+     спорил с тёплой палитрой узлов, и панель выглядела чужой вставкой. */
+  --m3d-accent: #f2b67c;
+  --m3d-accent-soft: rgba(242, 182, 124, 0.16);
+  --m3d-accent-line: rgba(242, 182, 124, 0.45);
+  --m3d-surface: rgba(26, 21, 17, 0.82);
+  --m3d-surface-solid: #14100c;
+  --m3d-hairline: rgba(255, 236, 216, 0.12);
+  --m3d-hairline-strong: rgba(255, 236, 216, 0.22);
+  --m3d-text: #ede6dc;
+  --m3d-text-dim: rgba(237, 230, 220, 0.55);
   --m3d-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 
   display: flex;
@@ -739,6 +741,40 @@ const CSS = `
   white-space: nowrap;
 }
 [data-model3d-viewer] .m3d-layers.is-one .m3d-layer-value { color: var(--m3d-accent); }
+
+/* Phones: the strip is replaced by a gesture along the right edge, and this is
+   what the gesture shows — the layer under the thumb, in the site's accent. */
+[data-model3d-viewer] .m3d-layers.is-compact { display: none; }
+[data-model3d-viewer] .m3d-layer-hint {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border-radius: 14px;
+  background: var(--m3d-surface);
+  border: 1px solid var(--m3d-accent-line);
+  color: var(--m3d-accent);
+  font-family: var(--m3d-mono);
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+  z-index: 3;
+}
+[data-model3d-viewer] .m3d-layer-hint.is-visible { opacity: 1; }
+[data-model3d-viewer] .m3d-layer-hint-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-model3d-viewer] .m3d-layer-hint-bar {
+  width: 3px;
+  height: 64px;
+  border-radius: 2px;
+  background: var(--m3d-accent);
+  opacity: 0.75;
+}
 
 /* The track is the whole vertical strip, so it can be grabbed anywhere; the
    groove inside it is what is actually drawn. Separating the two means the hit

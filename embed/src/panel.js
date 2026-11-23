@@ -2071,6 +2071,26 @@ class LayerSliderControl {
     ]);
     stage.append(this.container);
 
+    // Narrow screens get a gesture instead of a permanent strip: a thumb dragged
+    // down the right edge walks the cut through the plate, and the slider itself
+    // stays out of the way. The strip is not removed — it is what desktop uses —
+    // it is hidden by the compact class and mirrored by the gesture.
+    this.stage = stage;
+    this.gesture = null;
+    this.hideTimer = 0;
+    this.compact = stage.clientWidth > 0 && stage.clientWidth < 760;
+    if (this.compact) {
+      this.container.classList.add('is-compact');
+      this.hintValue = el('div', { class: 'm3d-layer-hint-value' });
+      this.hintBar = el('div', { class: 'm3d-layer-hint-bar' });
+      this.hint = el('div', { class: 'm3d-layer-hint' }, [this.hintValue, this.hintBar]);
+      stage.append(this.hint);
+      stage.addEventListener('pointerdown', this.onGestureStart, { passive: true });
+      stage.addEventListener('pointermove', this.onGestureMove, { passive: false });
+      stage.addEventListener('pointerup', this.onGestureEnd);
+      stage.addEventListener('pointercancel', this.onGestureEnd);
+    }
+
     this.track.addEventListener('pointermove', this.onPointerMove);
     this.track.addEventListener('lostpointercapture', this.onLostCapture);
     globalThis.addEventListener('pointerup', this.onPointerUp);
@@ -2145,6 +2165,50 @@ class LayerSliderControl {
 
   onLostCapture = () => {
     this.dragging = null;
+  };
+
+  /** Layer under a client-space Y inside the stage. */
+  layerAtY(clientY) {
+    const box = this.stage.getBoundingClientRect();
+    const ratio = (clientY - box.top) / Math.max(1, box.height);
+    return Math.round((1 - Math.min(1, Math.max(0, ratio))) * (this.count - 1));
+  }
+
+  showHint(layer) {
+    if (!this.hint) return;
+    this.hintValue.textContent = `${layer + 1} / ${this.count}`;
+    const percent = this.count <= 1 ? 100 : (layer / (this.count - 1)) * 100;
+    this.hintBar.style.height = `${Math.max(4, percent)}%`;
+    this.hint.classList.add('is-visible');
+  }
+
+  hideHintLater() {
+    clearTimeout(this.hideTimer);
+    this.hideTimer = setTimeout(() => this.hint?.classList.remove('is-visible'), 900);
+  }
+
+  onGestureStart = (event) => {
+    if (!this.compact || this.count < 2) return;
+    // Only the right third: the rest of the stage belongs to orbit and pinch.
+    const box = this.stage.getBoundingClientRect();
+    if (event.clientX < box.left + box.width * 0.62) return;
+    this.gesture = { id: event.pointerId };
+    this.showHint(this.range[1]);
+    this.onGestureMove(event);
+  };
+
+  onGestureMove = (event) => {
+    if (!this.gesture || event.pointerId !== this.gesture.id) return;
+    if (event.cancelable) event.preventDefault();
+    const layer = this.layerAtY(event.clientY);
+    if (layer !== this.range[1]) this.onChange(0, layer, true);
+    this.showHint(layer);
+  };
+
+  onGestureEnd = (event) => {
+    if (!this.gesture || (event && event.pointerId !== this.gesture.id)) return;
+    this.gesture = null;
+    this.hideHintLater();
   };
 
   onTrackClick(event) {
@@ -2222,6 +2286,14 @@ class LayerSliderControl {
     this.track.removeEventListener('lostpointercapture', this.onLostCapture);
     globalThis.removeEventListener('pointerup', this.onPointerUp);
     globalThis.removeEventListener('pointercancel', this.onPointerUp);
+    if (this.compact) {
+      this.stage.removeEventListener('pointerdown', this.onGestureStart);
+      this.stage.removeEventListener('pointermove', this.onGestureMove);
+      this.stage.removeEventListener('pointerup', this.onGestureEnd);
+      this.stage.removeEventListener('pointercancel', this.onGestureEnd);
+      clearTimeout(this.hideTimer);
+      this.hint?.remove();
+    }
     this.container.remove();
   }
 }

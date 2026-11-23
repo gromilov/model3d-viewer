@@ -1094,6 +1094,61 @@ const DEFAULT_HEIGHT = 0.2;
 const SEGMENT_BUDGET = 500000;
 
 /**
+ * Budget for the device at hand.
+ *
+ * A phone's GPU falls over well before the desktop cap: every kept segment is a
+ * quad with an extruded-stroke shader, and a 350k-segment plate loses the WebGL
+ * context on Adreno-class hardware. The phone budget keeps the shell and drops
+ * dense infill, so the plate still reads right — just without the strokes the
+ * eye cannot separate at that size anyway.
+ */
+function segmentBudget() {
+  const nav = globalThis.navigator ?? {};
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(nav.userAgent ?? '');
+  if (!mobile) return SEGMENT_BUDGET;
+  const memory = Number(nav.deviceMemory ?? 4);
+  // Полная нарезка важнее экономии: 400k пропускают обычную плату целиком,
+  // а потолок остаётся страховкой для по-настоящему гигантских файлов.
+  return memory >= 8 ? 400000 : 350000;
+}
+
+/**
+ * Thin the plate evenly across layers.
+ *
+ * Dropping the shortest strokes globally is wrong on two counts: short strokes
+ * are exactly the small fillets and curved facets a reader looks at, and the
+ * cut lands unevenly across layers, so stepping through them looks broken.
+ * Keeping every k-th stroke *within each layer* preserves the shape of every
+ * layer and the small details along with it — the plate thins out uniformly
+ * instead of losing parts.
+ */
+function thinEvenly(segments, budget) {
+  const perLayer = new Map();
+  for (const segment of segments) {
+    const key = Math.round(segment.layerZ * 1000) / 1000;
+    const list = perLayer.get(key);
+    if (list) list.push(segment);
+    else perLayer.set(key, [segment]);
+  }
+  if (perLayer.size === 0) return segments;
+
+  const quota = Math.max(1, Math.floor(budget / perLayer.size));
+  const kept = [];
+  for (const list of perLayer.values()) {
+    if (list.length <= quota) {
+      kept.push(...list);
+      continue;
+    }
+    // Take evenly spaced strokes, always including the last one so the layer closes.
+    const step = list.length / quota;
+    for (let i = 0; i < quota; i += 1) {
+      kept.push(list[Math.min(list.length - 1, Math.floor(i * step))]);
+    }
+  }
+  return kept;
+}
+
+/**
  * Split a slicer's per-section `;KEY:value` marker.
  *
  * The slicers this reader targets write their running width and height as
@@ -1347,11 +1402,9 @@ function parseGcode(text) {
   // Over budget, keep the longest strokes: they carry the visible shell, while
   // the dropped ones are the dense infill that reads as solid fill anyway.
   let kept = segments;
-  if (segments.length > SEGMENT_BUDGET) {
-    kept = segments
-      .slice()
-      .sort((a, b) => b.length - a.length)
-      .slice(0, SEGMENT_BUDGET);
+  const budget = segmentBudget();
+  if (segments.length > budget) {
+    kept = thinEvenly(segments, budget);
   }
 
   // One layer per distinct height, in print order.
@@ -2684,10 +2737,22 @@ function createViewer(canvas) {
   // by the on-screen size.
   let renderingExport = false;
 
+  /**
+   * Backing-store ratio. Phones get 1.5 instead of 2.5: the stroke shader is
+   * fragment-bound, and on a 3x screen the difference between 2.5 and 1.5 is
+   * ~2.8x fewer shaded pixels — the difference between a plate that renders and
+   * one that loses the context.
+   */
+  const pixelRatio = () => {
+    const dpr = globalThis.devicePixelRatio ?? 1;
+    const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(globalThis.navigator?.userAgent ?? '');
+    return Math.min(dpr, mobile ? 1.5 : 2.5);
+  };
+
   /** Resize the backing store to the canvas's device-pixel size. */
   const resize = () => {
     if (renderingExport) return;
-    const ratio = Math.min(globalThis.devicePixelRatio ?? 1, 2.5);
+    const ratio = pixelRatio();
     const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
     const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
     if (canvas.width !== width || canvas.height !== height) {
@@ -4727,15 +4792,17 @@ function frameScheduler(callback) {
 
 const CSS = `
 [data-model3d-viewer] {
-  --m3d-accent: #118980;
-  --m3d-accent-soft: rgba(17, 137, 128, 0.16);
-  --m3d-accent-line: rgba(17, 137, 128, 0.45);
-  --m3d-surface: rgba(24, 25, 27, 0.78);
-  --m3d-surface-solid: #1c1d20;
-  --m3d-hairline: rgba(255, 255, 255, 0.10);
-  --m3d-hairline-strong: rgba(255, 255, 255, 0.18);
-  --m3d-text: #d6d8db;
-  --m3d-text-dim: rgba(214, 216, 219, 0.52);
+  /* Тема Ткани: янтарь на угле. Раньше здесь был бирюзовый #118980 — он
+     спорил с тёплой палитрой узлов, и панель выглядела чужой вставкой. */
+  --m3d-accent: #f2b67c;
+  --m3d-accent-soft: rgba(242, 182, 124, 0.16);
+  --m3d-accent-line: rgba(242, 182, 124, 0.45);
+  --m3d-surface: rgba(26, 21, 17, 0.82);
+  --m3d-surface-solid: #14100c;
+  --m3d-hairline: rgba(255, 236, 216, 0.12);
+  --m3d-hairline-strong: rgba(255, 236, 216, 0.22);
+  --m3d-text: #ede6dc;
+  --m3d-text-dim: rgba(237, 230, 220, 0.55);
   --m3d-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 
   display: flex;
@@ -5452,6 +5519,40 @@ const CSS = `
   white-space: nowrap;
 }
 [data-model3d-viewer] .m3d-layers.is-one .m3d-layer-value { color: var(--m3d-accent); }
+
+/* Phones: the strip is replaced by a gesture along the right edge, and this is
+   what the gesture shows — the layer under the thumb, in the site's accent. */
+[data-model3d-viewer] .m3d-layers.is-compact { display: none; }
+[data-model3d-viewer] .m3d-layer-hint {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px;
+  border-radius: 14px;
+  background: var(--m3d-surface);
+  border: 1px solid var(--m3d-accent-line);
+  color: var(--m3d-accent);
+  font-family: var(--m3d-mono);
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+  z-index: 3;
+}
+[data-model3d-viewer] .m3d-layer-hint.is-visible { opacity: 1; }
+[data-model3d-viewer] .m3d-layer-hint-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
+[data-model3d-viewer] .m3d-layer-hint-bar {
+  width: 3px;
+  height: 64px;
+  border-radius: 2px;
+  background: var(--m3d-accent);
+  opacity: 0.75;
+}
 
 /* The track is the whole vertical strip, so it can be grabbed anywhere; the
    groove inside it is what is actually drawn. Separating the two means the hit
@@ -11387,6 +11488,26 @@ class LayerSliderControl {
     ]);
     stage.append(this.container);
 
+    // Narrow screens get a gesture instead of a permanent strip: a thumb dragged
+    // down the right edge walks the cut through the plate, and the slider itself
+    // stays out of the way. The strip is not removed — it is what desktop uses —
+    // it is hidden by the compact class and mirrored by the gesture.
+    this.stage = stage;
+    this.gesture = null;
+    this.hideTimer = 0;
+    this.compact = stage.clientWidth > 0 && stage.clientWidth < 760;
+    if (this.compact) {
+      this.container.classList.add('is-compact');
+      this.hintValue = el('div', { class: 'm3d-layer-hint-value' });
+      this.hintBar = el('div', { class: 'm3d-layer-hint-bar' });
+      this.hint = el('div', { class: 'm3d-layer-hint' }, [this.hintValue, this.hintBar]);
+      stage.append(this.hint);
+      stage.addEventListener('pointerdown', this.onGestureStart, { passive: true });
+      stage.addEventListener('pointermove', this.onGestureMove, { passive: false });
+      stage.addEventListener('pointerup', this.onGestureEnd);
+      stage.addEventListener('pointercancel', this.onGestureEnd);
+    }
+
     this.track.addEventListener('pointermove', this.onPointerMove);
     this.track.addEventListener('lostpointercapture', this.onLostCapture);
     globalThis.addEventListener('pointerup', this.onPointerUp);
@@ -11461,6 +11582,50 @@ class LayerSliderControl {
 
   onLostCapture = () => {
     this.dragging = null;
+  };
+
+  /** Layer under a client-space Y inside the stage. */
+  layerAtY(clientY) {
+    const box = this.stage.getBoundingClientRect();
+    const ratio = (clientY - box.top) / Math.max(1, box.height);
+    return Math.round((1 - Math.min(1, Math.max(0, ratio))) * (this.count - 1));
+  }
+
+  showHint(layer) {
+    if (!this.hint) return;
+    this.hintValue.textContent = `${layer + 1} / ${this.count}`;
+    const percent = this.count <= 1 ? 100 : (layer / (this.count - 1)) * 100;
+    this.hintBar.style.height = `${Math.max(4, percent)}%`;
+    this.hint.classList.add('is-visible');
+  }
+
+  hideHintLater() {
+    clearTimeout(this.hideTimer);
+    this.hideTimer = setTimeout(() => this.hint?.classList.remove('is-visible'), 900);
+  }
+
+  onGestureStart = (event) => {
+    if (!this.compact || this.count < 2) return;
+    // Only the right third: the rest of the stage belongs to orbit and pinch.
+    const box = this.stage.getBoundingClientRect();
+    if (event.clientX < box.left + box.width * 0.62) return;
+    this.gesture = { id: event.pointerId };
+    this.showHint(this.range[1]);
+    this.onGestureMove(event);
+  };
+
+  onGestureMove = (event) => {
+    if (!this.gesture || event.pointerId !== this.gesture.id) return;
+    if (event.cancelable) event.preventDefault();
+    const layer = this.layerAtY(event.clientY);
+    if (layer !== this.range[1]) this.onChange(0, layer, true);
+    this.showHint(layer);
+  };
+
+  onGestureEnd = (event) => {
+    if (!this.gesture || (event && event.pointerId !== this.gesture.id)) return;
+    this.gesture = null;
+    this.hideHintLater();
   };
 
   onTrackClick(event) {
@@ -11538,6 +11703,14 @@ class LayerSliderControl {
     this.track.removeEventListener('lostpointercapture', this.onLostCapture);
     globalThis.removeEventListener('pointerup', this.onPointerUp);
     globalThis.removeEventListener('pointercancel', this.onPointerUp);
+    if (this.compact) {
+      this.stage.removeEventListener('pointerdown', this.onGestureStart);
+      this.stage.removeEventListener('pointermove', this.onGestureMove);
+      this.stage.removeEventListener('pointerup', this.onGestureEnd);
+      this.stage.removeEventListener('pointercancel', this.onGestureEnd);
+      clearTimeout(this.hideTimer);
+      this.hint?.remove();
+    }
     this.container.remove();
   }
 }
