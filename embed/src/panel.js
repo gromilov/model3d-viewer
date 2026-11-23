@@ -2081,14 +2081,17 @@ class LayerSliderControl {
     this.compact = stage.clientWidth > 0 && stage.clientWidth < 760;
     if (this.compact) {
       this.container.classList.add('is-compact');
-      this.hintValue = el('div', { class: 'm3d-layer-hint-value' });
       this.hintBar = el('div', { class: 'm3d-layer-hint-bar' });
-      this.hint = el('div', { class: 'm3d-layer-hint' }, [this.hintValue, this.hintBar]);
+      this.hintValue = el('div', { class: 'm3d-layer-hint-value' });
+      this.hint = el('div', { class: 'm3d-layer-hint' }, [this.hintBar, this.hintValue]);
       stage.append(this.hint);
-      stage.addEventListener('pointerdown', this.onGestureStart, { passive: true });
-      stage.addEventListener('pointermove', this.onGestureMove, { passive: false });
-      stage.addEventListener('pointerup', this.onGestureEnd);
-      stage.addEventListener('pointercancel', this.onGestureEnd);
+      // Capture phase: the viewer listens on the canvas for orbit, and a drag
+      // that starts in the edge strip must not also spin the model. Grabbing the
+      // event before it reaches the canvas is what keeps the two apart.
+      stage.addEventListener('pointerdown', this.onGestureStart, { capture: true });
+      stage.addEventListener('pointermove', this.onGestureMove, { capture: true, passive: false });
+      stage.addEventListener('pointerup', this.onGestureEnd, true);
+      stage.addEventListener('pointercancel', this.onGestureEnd, true);
     }
 
     this.track.addEventListener('pointermove', this.onPointerMove);
@@ -2178,7 +2181,7 @@ class LayerSliderControl {
     if (!this.hint) return;
     this.hintValue.textContent = `${layer + 1} / ${this.count}`;
     const percent = this.count <= 1 ? 100 : (layer / (this.count - 1)) * 100;
-    this.hintBar.style.height = `${Math.max(4, percent)}%`;
+    this.hintBar.style.height = `${Math.max(2, percent)}%`;
     this.hint.classList.add('is-visible');
   }
 
@@ -2189,9 +2192,14 @@ class LayerSliderControl {
 
   onGestureStart = (event) => {
     if (!this.compact || this.count < 2) return;
-    // Only the right third: the rest of the stage belongs to orbit and pinch.
+    // Only a narrow strip at the right edge — a thumb's width, not a third of the
+    // plate. Everything left of it stays with orbit and pinch.
     const box = this.stage.getBoundingClientRect();
-    if (event.clientX < box.left + box.width * 0.62) return;
+    const strip = Math.min(56, Math.max(38, box.width * 0.11));
+    if (event.clientX < box.right - strip) return;
+    // Claim the gesture: otherwise the canvas also reads it as a drag and spins.
+    event.preventDefault();
+    event.stopPropagation();
     this.gesture = { id: event.pointerId };
     this.showHint(this.range[1]);
     this.onGestureMove(event);
@@ -2200,6 +2208,7 @@ class LayerSliderControl {
   onGestureMove = (event) => {
     if (!this.gesture || event.pointerId !== this.gesture.id) return;
     if (event.cancelable) event.preventDefault();
+    event.stopPropagation();
     const layer = this.layerAtY(event.clientY);
     if (layer !== this.range[1]) this.onChange(0, layer, true);
     this.showHint(layer);
@@ -2207,6 +2216,7 @@ class LayerSliderControl {
 
   onGestureEnd = (event) => {
     if (!this.gesture || (event && event.pointerId !== this.gesture.id)) return;
+    if (event && event.cancelable) event.preventDefault();
     this.gesture = null;
     this.hideHintLater();
   };

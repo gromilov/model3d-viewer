@@ -742,38 +742,46 @@ const CSS = `
 }
 [data-model3d-viewer] .m3d-layers.is-one .m3d-layer-value { color: var(--m3d-accent); }
 
-/* Phones: the strip is replaced by a gesture along the right edge, and this is
-   what the gesture shows — the layer under the thumb, in the site's accent. */
+/* Phones: the strip is replaced by a gesture along the right edge. What the
+   gesture shows is iOS's volume bar — a translucent rounded channel from top to
+   bottom with the level filled in, so it reads as a slider without teaching. */
 [data-model3d-viewer] .m3d-layers.is-compact { display: none; }
 [data-model3d-viewer] .m3d-layer-hint {
   position: absolute;
-  top: 50%;
-  right: 14px;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 8px;
-  border-radius: 14px;
-  background: var(--m3d-surface);
-  border: 1px solid var(--m3d-accent-line);
-  color: var(--m3d-accent);
-  font-family: var(--m3d-mono);
-  font-size: 12px;
+  top: 14px;
+  bottom: 14px;
+  right: 10px;
+  width: 11px;
+  border-radius: 6px;
+  background: rgba(237, 230, 220, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 236, 216, 0.12);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s ease;
   z-index: 3;
 }
 [data-model3d-viewer] .m3d-layer-hint.is-visible { opacity: 1; }
-[data-model3d-viewer] .m3d-layer-hint-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
 [data-model3d-viewer] .m3d-layer-hint-bar {
-  width: 3px;
-  height: 64px;
-  border-radius: 2px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 6px;
   background: var(--m3d-accent);
-  opacity: 0.75;
+  transition: height 0.08s linear;
+}
+[data-model3d-viewer] .m3d-layer-hint-value {
+  position: absolute;
+  right: 18px;
+  bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--m3d-surface);
+  color: var(--m3d-accent);
+  font-family: var(--m3d-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* The track is the whole vertical strip, so it can be grabbed anywhere; the

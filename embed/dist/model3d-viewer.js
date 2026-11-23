@@ -5522,38 +5522,46 @@ const CSS = `
 }
 [data-model3d-viewer] .m3d-layers.is-one .m3d-layer-value { color: var(--m3d-accent); }
 
-/* Phones: the strip is replaced by a gesture along the right edge, and this is
-   what the gesture shows — the layer under the thumb, in the site's accent. */
+/* Phones: the strip is replaced by a gesture along the right edge. What the
+   gesture shows is iOS's volume bar — a translucent rounded channel from top to
+   bottom with the level filled in, so it reads as a slider without teaching. */
 [data-model3d-viewer] .m3d-layers.is-compact { display: none; }
 [data-model3d-viewer] .m3d-layer-hint {
   position: absolute;
-  top: 50%;
-  right: 14px;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 8px;
-  border-radius: 14px;
-  background: var(--m3d-surface);
-  border: 1px solid var(--m3d-accent-line);
-  color: var(--m3d-accent);
-  font-family: var(--m3d-mono);
-  font-size: 12px;
+  top: 14px;
+  bottom: 14px;
+  right: 10px;
+  width: 11px;
+  border-radius: 6px;
+  background: rgba(237, 230, 220, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 236, 216, 0.12);
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.18s ease;
   z-index: 3;
 }
 [data-model3d-viewer] .m3d-layer-hint.is-visible { opacity: 1; }
-[data-model3d-viewer] .m3d-layer-hint-value { font-variant-numeric: tabular-nums; white-space: nowrap; }
 [data-model3d-viewer] .m3d-layer-hint-bar {
-  width: 3px;
-  height: 64px;
-  border-radius: 2px;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 6px;
   background: var(--m3d-accent);
-  opacity: 0.75;
+  transition: height 0.08s linear;
+}
+[data-model3d-viewer] .m3d-layer-hint-value {
+  position: absolute;
+  right: 18px;
+  bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--m3d-surface);
+  color: var(--m3d-accent);
+  font-family: var(--m3d-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 /* The track is the whole vertical strip, so it can be grabbed anywhere; the
@@ -11500,14 +11508,17 @@ class LayerSliderControl {
     this.compact = stage.clientWidth > 0 && stage.clientWidth < 760;
     if (this.compact) {
       this.container.classList.add('is-compact');
-      this.hintValue = el('div', { class: 'm3d-layer-hint-value' });
       this.hintBar = el('div', { class: 'm3d-layer-hint-bar' });
-      this.hint = el('div', { class: 'm3d-layer-hint' }, [this.hintValue, this.hintBar]);
+      this.hintValue = el('div', { class: 'm3d-layer-hint-value' });
+      this.hint = el('div', { class: 'm3d-layer-hint' }, [this.hintBar, this.hintValue]);
       stage.append(this.hint);
-      stage.addEventListener('pointerdown', this.onGestureStart, { passive: true });
-      stage.addEventListener('pointermove', this.onGestureMove, { passive: false });
-      stage.addEventListener('pointerup', this.onGestureEnd);
-      stage.addEventListener('pointercancel', this.onGestureEnd);
+      // Capture phase: the viewer listens on the canvas for orbit, and a drag
+      // that starts in the edge strip must not also spin the model. Grabbing the
+      // event before it reaches the canvas is what keeps the two apart.
+      stage.addEventListener('pointerdown', this.onGestureStart, { capture: true });
+      stage.addEventListener('pointermove', this.onGestureMove, { capture: true, passive: false });
+      stage.addEventListener('pointerup', this.onGestureEnd, true);
+      stage.addEventListener('pointercancel', this.onGestureEnd, true);
     }
 
     this.track.addEventListener('pointermove', this.onPointerMove);
@@ -11597,7 +11608,7 @@ class LayerSliderControl {
     if (!this.hint) return;
     this.hintValue.textContent = `${layer + 1} / ${this.count}`;
     const percent = this.count <= 1 ? 100 : (layer / (this.count - 1)) * 100;
-    this.hintBar.style.height = `${Math.max(4, percent)}%`;
+    this.hintBar.style.height = `${Math.max(2, percent)}%`;
     this.hint.classList.add('is-visible');
   }
 
@@ -11608,9 +11619,14 @@ class LayerSliderControl {
 
   onGestureStart = (event) => {
     if (!this.compact || this.count < 2) return;
-    // Only the right third: the rest of the stage belongs to orbit and pinch.
+    // Only a narrow strip at the right edge — a thumb's width, not a third of the
+    // plate. Everything left of it stays with orbit and pinch.
     const box = this.stage.getBoundingClientRect();
-    if (event.clientX < box.left + box.width * 0.62) return;
+    const strip = Math.min(56, Math.max(38, box.width * 0.11));
+    if (event.clientX < box.right - strip) return;
+    // Claim the gesture: otherwise the canvas also reads it as a drag and spins.
+    event.preventDefault();
+    event.stopPropagation();
     this.gesture = { id: event.pointerId };
     this.showHint(this.range[1]);
     this.onGestureMove(event);
@@ -11619,6 +11635,7 @@ class LayerSliderControl {
   onGestureMove = (event) => {
     if (!this.gesture || event.pointerId !== this.gesture.id) return;
     if (event.cancelable) event.preventDefault();
+    event.stopPropagation();
     const layer = this.layerAtY(event.clientY);
     if (layer !== this.range[1]) this.onChange(0, layer, true);
     this.showHint(layer);
@@ -11626,6 +11643,7 @@ class LayerSliderControl {
 
   onGestureEnd = (event) => {
     if (!this.gesture || (event && event.pointerId !== this.gesture.id)) return;
+    if (event && event.cancelable) event.preventDefault();
     this.gesture = null;
     this.hideHintLater();
   };
