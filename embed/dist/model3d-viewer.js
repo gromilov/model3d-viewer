@@ -3252,7 +3252,30 @@ function createViewer(canvas) {
 
   let dragging = null;
 
+  /**
+   * Два пальца — масштаб.
+   *
+   * Мышь приближает колесом, а на телефоне колеса нет: без этого жеста модель
+   * нельзя ни приблизить, ни отдалить. Держим карту живых касаний, и как только
+   * их два — перестаём вращать и считаем расстояние между ними.
+   */
+  const touchPoints = new Map();
+  let pinch = null;
+
+  const pinchDistance = () => {
+    const [a, b] = [...touchPoints.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+
   const onPointerDown = (event) => {
+    if (event.pointerType === 'touch') {
+      touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (touchPoints.size === 2) {
+        pinch = { start: pinchDistance(), zoom };
+        dragging = null;
+        return;
+      }
+    }
     // OrcaSlicer's pairing: the primary button orbits, the right button (and the
     // middle one, and the primary with Shift) slides the scene. Right-drag is
     // the one most hands reach for, so it leads the comment.
@@ -3275,6 +3298,18 @@ function createViewer(canvas) {
   };
 
   const onPointerMove = (event) => {
+    if (event.pointerType === 'touch' && touchPoints.has(event.pointerId)) {
+      touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinch && touchPoints.size >= 2) {
+        const now = pinchDistance();
+        if (pinch.start > 4 && now > 4) {
+          const next = pinch.zoom * (pinch.start / now);
+          zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
+          requestDraw();
+        }
+        return;
+      }
+    }
     if (dragging === null) return;
     const deltaX = event.clientX - dragging.x;
     const deltaY = event.clientY - dragging.y;
@@ -3331,6 +3366,11 @@ function createViewer(canvas) {
    * matches a real button, so a cancel still ends the gesture.
    */
   const endDrag = (event) => {
+    if (event.pointerType === 'touch') {
+      touchPoints.delete(event.pointerId);
+      if (touchPoints.size < 2) pinch = null;
+      if (touchPoints.size === 0) dragging = null;
+    }
     if (dragging === null) return;
     const released = event.button;
     const isRealButton = typeof released === 'number' && released >= 0;
@@ -11515,6 +11555,9 @@ class LayerSliderControl {
       // Capture phase: the viewer listens on the canvas for orbit, and a drag
       // that starts in the edge strip must not also spin the model. Grabbing the
       // event before it reaches the canvas is what keeps the two apart.
+      stage.addEventListener('pointerdown', this.onTrackPointer, { capture: true });
+      stage.addEventListener('pointerup', this.onTrackPointer, { capture: true });
+      stage.addEventListener('pointercancel', this.onTrackPointer, { capture: true });
       stage.addEventListener('pointerdown', this.onGestureStart, { capture: true });
       stage.addEventListener('pointermove', this.onGestureMove, { capture: true, passive: false });
       stage.addEventListener('pointerup', this.onGestureEnd, true);
@@ -11617,8 +11660,22 @@ class LayerSliderControl {
     this.hideTimer = setTimeout(() => this.hint?.classList.remove('is-visible'), 900);
   }
 
+  onTrackPointer = (event) => {
+    // Держим список активных касаний: два пальца — это зум, его трогать нельзя.
+    if (!this.activePointers) this.activePointers = new Set();
+    if (event.type === 'pointerdown') this.activePointers.add(event.pointerId);
+    else this.activePointers.delete(event.pointerId);
+    if (this.activePointers.size > 1 && this.gesture) {
+      // начался второй палец — отдаём жест вьюеру (pinch), слой больше не крутим
+      this.gesture = null;
+      this.hideHintLater();
+    }
+  };
+
   onGestureStart = (event) => {
     if (!this.compact || this.count < 2) return;
+    // Два пальца = масштабирование, слой в этом жесте не участвует.
+    if (this.activePointers && this.activePointers.size > 1) return;
     // Only a narrow strip at the right edge — a thumb's width, not a third of the
     // plate. Everything left of it stays with orbit and pinch.
     const box = this.stage.getBoundingClientRect();

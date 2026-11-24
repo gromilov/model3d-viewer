@@ -1611,7 +1611,30 @@ export function createViewer(canvas) {
 
   let dragging = null;
 
+  /**
+   * Два пальца — масштаб.
+   *
+   * Мышь приближает колесом, а на телефоне колеса нет: без этого жеста модель
+   * нельзя ни приблизить, ни отдалить. Держим карту живых касаний, и как только
+   * их два — перестаём вращать и считаем расстояние между ними.
+   */
+  const touchPoints = new Map();
+  let pinch = null;
+
+  const pinchDistance = () => {
+    const [a, b] = [...touchPoints.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+
   const onPointerDown = (event) => {
+    if (event.pointerType === 'touch') {
+      touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (touchPoints.size === 2) {
+        pinch = { start: pinchDistance(), zoom };
+        dragging = null;
+        return;
+      }
+    }
     // OrcaSlicer's pairing: the primary button orbits, the right button (and the
     // middle one, and the primary with Shift) slides the scene. Right-drag is
     // the one most hands reach for, so it leads the comment.
@@ -1634,6 +1657,18 @@ export function createViewer(canvas) {
   };
 
   const onPointerMove = (event) => {
+    if (event.pointerType === 'touch' && touchPoints.has(event.pointerId)) {
+      touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinch && touchPoints.size >= 2) {
+        const now = pinchDistance();
+        if (pinch.start > 4 && now > 4) {
+          const next = pinch.zoom * (pinch.start / now);
+          zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
+          requestDraw();
+        }
+        return;
+      }
+    }
     if (dragging === null) return;
     const deltaX = event.clientX - dragging.x;
     const deltaY = event.clientY - dragging.y;
@@ -1690,6 +1725,11 @@ export function createViewer(canvas) {
    * matches a real button, so a cancel still ends the gesture.
    */
   const endDrag = (event) => {
+    if (event.pointerType === 'touch') {
+      touchPoints.delete(event.pointerId);
+      if (touchPoints.size < 2) pinch = null;
+      if (touchPoints.size === 0) dragging = null;
+    }
     if (dragging === null) return;
     const released = event.button;
     const isRealButton = typeof released === 'number' && released >= 0;

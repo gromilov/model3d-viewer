@@ -969,6 +969,61 @@ const DEFAULT_HEIGHT = 0.2;
 const SEGMENT_BUDGET = 500000;
 
 /**
+ * Budget for the device at hand.
+ *
+ * A phone's GPU falls over well before the desktop cap: every kept segment is a
+ * quad with an extruded-stroke shader, and a 350k-segment plate loses the WebGL
+ * context on Adreno-class hardware. The phone budget keeps the shell and drops
+ * dense infill, so the plate still reads right — just without the strokes the
+ * eye cannot separate at that size anyway.
+ */
+function segmentBudget() {
+  const nav = globalThis.navigator ?? {};
+  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(nav.userAgent ?? '');
+  if (!mobile) return SEGMENT_BUDGET;
+  const memory = Number(nav.deviceMemory ?? 4);
+  // Полная нарезка важнее экономии: 400k пропускают обычную плату целиком,
+  // а потолок остаётся страховкой для по-настоящему гигантских файлов.
+  return memory >= 8 ? 400000 : 350000;
+}
+
+/**
+ * Thin the plate evenly across layers.
+ *
+ * Dropping the shortest strokes globally is wrong on two counts: short strokes
+ * are exactly the small fillets and curved facets a reader looks at, and the
+ * cut lands unevenly across layers, so stepping through them looks broken.
+ * Keeping every k-th stroke *within each layer* preserves the shape of every
+ * layer and the small details along with it — the plate thins out uniformly
+ * instead of losing parts.
+ */
+function thinEvenly(segments, budget) {
+  const perLayer = new Map();
+  for (const segment of segments) {
+    const key = Math.round(segment.layerZ * 1000) / 1000;
+    const list = perLayer.get(key);
+    if (list) list.push(segment);
+    else perLayer.set(key, [segment]);
+  }
+  if (perLayer.size === 0) return segments;
+
+  const quota = Math.max(1, Math.floor(budget / perLayer.size));
+  const kept = [];
+  for (const list of perLayer.values()) {
+    if (list.length <= quota) {
+      kept.push(...list);
+      continue;
+    }
+    // Take evenly spaced strokes, always including the last one so the layer closes.
+    const step = list.length / quota;
+    for (let i = 0; i < quota; i += 1) {
+      kept.push(list[Math.min(list.length - 1, Math.floor(i * step))]);
+    }
+  }
+  return kept;
+}
+
+/**
  * Split a slicer's per-section `;KEY:value` marker.
  *
  * The slicers this reader targets write their running width and height as
@@ -1222,11 +1277,9 @@ function parseGcode(text) {
   // Over budget, keep the longest strokes: they carry the visible shell, while
   // the dropped ones are the dense infill that reads as solid fill anyway.
   let kept = segments;
-  if (segments.length > SEGMENT_BUDGET) {
-    kept = segments
-      .slice()
-      .sort((a, b) => b.length - a.length)
-      .slice(0, SEGMENT_BUDGET);
+  const budget = segmentBudget();
+  if (segments.length > budget) {
+    kept = thinEvenly(segments, budget);
   }
 
   // One layer per distinct height, in print order.
@@ -2560,10 +2613,22 @@ function createViewer(canvas) {
   // by the on-screen size.
   let renderingExport = false;
 
+  /**
+   * Backing-store ratio. Phones get 1.5 instead of 2.5: the stroke shader is
+   * fragment-bound, and on a 3x screen the difference between 2.5 and 1.5 is
+   * ~2.8x fewer shaded pixels — the difference between a plate that renders and
+   * one that loses the context.
+   */
+  const pixelRatio = () => {
+    const dpr = globalThis.devicePixelRatio ?? 1;
+    const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(globalThis.navigator?.userAgent ?? '');
+    return Math.min(dpr, mobile ? 1.5 : 2.5);
+  };
+
   /** Resize the backing store to the canvas's device-pixel size. */
   const resize = () => {
     if (renderingExport) return;
-    const ratio = Math.min(globalThis.devicePixelRatio ?? 1, 2.5);
+    const ratio = pixelRatio();
     const width = Math.max(1, Math.round(canvas.clientWidth * ratio));
     const height = Math.max(1, Math.round(canvas.clientHeight * ratio));
     if (canvas.width !== width || canvas.height !== height) {
@@ -3061,7 +3126,30 @@ function createViewer(canvas) {
 
   let dragging = null;
 
+  /**
+   * Два пальца — масштаб.
+   *
+   * Мышь приближает колесом, а на телефоне колеса нет: без этого жеста модель
+   * нельзя ни приблизить, ни отдалить. Держим карту живых касаний, и как только
+   * их два — перестаём вращать и считаем расстояние между ними.
+   */
+  const touchPoints = new Map();
+  let pinch = null;
+
+  const pinchDistance = () => {
+    const [a, b] = [...touchPoints.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
+
   const onPointerDown = (event) => {
+    if (event.pointerType === 'touch') {
+      touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (touchPoints.size === 2) {
+        pinch = { start: pinchDistance(), zoom };
+        dragging = null;
+        return;
+      }
+    }
     // OrcaSlicer's pairing: the primary button orbits, the right button (and the
     // middle one, and the primary with Shift) slides the scene. Right-drag is
     // the one most hands reach for, so it leads the comment.
@@ -3084,6 +3172,18 @@ function createViewer(canvas) {
   };
 
   const onPointerMove = (event) => {
+    if (event.pointerType === 'touch' && touchPoints.has(event.pointerId)) {
+      touchPoints.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinch && touchPoints.size >= 2) {
+        const now = pinchDistance();
+        if (pinch.start > 4 && now > 4) {
+          const next = pinch.zoom * (pinch.start / now);
+          zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
+          requestDraw();
+        }
+        return;
+      }
+    }
     if (dragging === null) return;
     const deltaX = event.clientX - dragging.x;
     const deltaY = event.clientY - dragging.y;
@@ -3140,6 +3240,11 @@ function createViewer(canvas) {
    * matches a real button, so a cancel still ends the gesture.
    */
   const endDrag = (event) => {
+    if (event.pointerType === 'touch') {
+      touchPoints.delete(event.pointerId);
+      if (touchPoints.size < 2) pinch = null;
+      if (touchPoints.size === 0) dragging = null;
+    }
     if (dragging === null) return;
     const released = event.button;
     const isRealButton = typeof released === 'number' && released >= 0;
@@ -4606,15 +4711,17 @@ function frameScheduler(callback) {
 
 const CSS = `
 [data-model3d-viewer] {
-  --m3d-accent: #118980;
-  --m3d-accent-soft: rgba(17, 137, 128, 0.16);
-  --m3d-accent-line: rgba(17, 137, 128, 0.45);
-  --m3d-surface: rgba(24, 25, 27, 0.78);
-  --m3d-surface-solid: #1c1d20;
-  --m3d-hairline: rgba(255, 255, 255, 0.10);
-  --m3d-hairline-strong: rgba(255, 255, 255, 0.18);
-  --m3d-text: #d6d8db;
-  --m3d-text-dim: rgba(214, 216, 219, 0.52);
+  /* Тема Ткани: янтарь на угле. Раньше здесь был бирюзовый #118980 — он
+     спорил с тёплой палитрой узлов, и панель выглядела чужой вставкой. */
+  --m3d-accent: #f2b67c;
+  --m3d-accent-soft: rgba(242, 182, 124, 0.16);
+  --m3d-accent-line: rgba(242, 182, 124, 0.45);
+  --m3d-surface: rgba(26, 21, 17, 0.82);
+  --m3d-surface-solid: #14100c;
+  --m3d-hairline: rgba(255, 236, 216, 0.12);
+  --m3d-hairline-strong: rgba(255, 236, 216, 0.22);
+  --m3d-text: #ede6dc;
+  --m3d-text-dim: rgba(237, 230, 220, 0.55);
   --m3d-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
 
   display: flex;
@@ -5331,6 +5438,48 @@ const CSS = `
   white-space: nowrap;
 }
 [data-model3d-viewer] .m3d-layers.is-one .m3d-layer-value { color: var(--m3d-accent); }
+
+/* Phones: the strip is replaced by a gesture along the right edge. What the
+   gesture shows is iOS's volume bar — a translucent rounded channel from top to
+   bottom with the level filled in, so it reads as a slider without teaching. */
+[data-model3d-viewer] .m3d-layers.is-compact { display: none; }
+[data-model3d-viewer] .m3d-layer-hint {
+  position: absolute;
+  top: 14px;
+  bottom: 14px;
+  right: 10px;
+  width: 11px;
+  border-radius: 6px;
+  background: rgba(237, 230, 220, 0.22);
+  box-shadow: inset 0 0 0 1px rgba(255, 236, 216, 0.12);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+  z-index: 3;
+}
+[data-model3d-viewer] .m3d-layer-hint.is-visible { opacity: 1; }
+[data-model3d-viewer] .m3d-layer-hint-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 6px;
+  background: var(--m3d-accent);
+  transition: height 0.08s linear;
+}
+[data-model3d-viewer] .m3d-layer-hint-value {
+  position: absolute;
+  right: 18px;
+  bottom: 6px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--m3d-surface);
+  color: var(--m3d-accent);
+  font-family: var(--m3d-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
 
 /* The track is the whole vertical strip, so it can be grabbed anywhere; the
    groove inside it is what is actually drawn. Separating the two means the hit
@@ -11273,6 +11422,32 @@ class LayerSliderControl {
     ]);
     stage.append(this.container);
 
+    // Narrow screens get a gesture instead of a permanent strip: a thumb dragged
+    // down the right edge walks the cut through the plate, and the slider itself
+    // stays out of the way. The strip is not removed — it is what desktop uses —
+    // it is hidden by the compact class and mirrored by the gesture.
+    this.stage = stage;
+    this.gesture = null;
+    this.hideTimer = 0;
+    this.compact = stage.clientWidth > 0 && stage.clientWidth < 760;
+    if (this.compact) {
+      this.container.classList.add('is-compact');
+      this.hintBar = el('div', { class: 'm3d-layer-hint-bar' });
+      this.hintValue = el('div', { class: 'm3d-layer-hint-value' });
+      this.hint = el('div', { class: 'm3d-layer-hint' }, [this.hintBar, this.hintValue]);
+      stage.append(this.hint);
+      // Capture phase: the viewer listens on the canvas for orbit, and a drag
+      // that starts in the edge strip must not also spin the model. Grabbing the
+      // event before it reaches the canvas is what keeps the two apart.
+      stage.addEventListener('pointerdown', this.onTrackPointer, { capture: true });
+      stage.addEventListener('pointerup', this.onTrackPointer, { capture: true });
+      stage.addEventListener('pointercancel', this.onTrackPointer, { capture: true });
+      stage.addEventListener('pointerdown', this.onGestureStart, { capture: true });
+      stage.addEventListener('pointermove', this.onGestureMove, { capture: true, passive: false });
+      stage.addEventListener('pointerup', this.onGestureEnd, true);
+      stage.addEventListener('pointercancel', this.onGestureEnd, true);
+    }
+
     this.track.addEventListener('pointermove', this.onPointerMove);
     this.track.addEventListener('lostpointercapture', this.onLostCapture);
     globalThis.addEventListener('pointerup', this.onPointerUp);
@@ -11347,6 +11522,71 @@ class LayerSliderControl {
 
   onLostCapture = () => {
     this.dragging = null;
+  };
+
+  /** Layer under a client-space Y inside the stage. */
+  layerAtY(clientY) {
+    const box = this.stage.getBoundingClientRect();
+    const ratio = (clientY - box.top) / Math.max(1, box.height);
+    return Math.round((1 - Math.min(1, Math.max(0, ratio))) * (this.count - 1));
+  }
+
+  showHint(layer) {
+    if (!this.hint) return;
+    this.hintValue.textContent = `${layer + 1} / ${this.count}`;
+    const percent = this.count <= 1 ? 100 : (layer / (this.count - 1)) * 100;
+    this.hintBar.style.height = `${Math.max(2, percent)}%`;
+    this.hint.classList.add('is-visible');
+  }
+
+  hideHintLater() {
+    clearTimeout(this.hideTimer);
+    this.hideTimer = setTimeout(() => this.hint?.classList.remove('is-visible'), 900);
+  }
+
+  onTrackPointer = (event) => {
+    // Держим список активных касаний: два пальца — это зум, его трогать нельзя.
+    if (!this.activePointers) this.activePointers = new Set();
+    if (event.type === 'pointerdown') this.activePointers.add(event.pointerId);
+    else this.activePointers.delete(event.pointerId);
+    if (this.activePointers.size > 1 && this.gesture) {
+      // начался второй палец — отдаём жест вьюеру (pinch), слой больше не крутим
+      this.gesture = null;
+      this.hideHintLater();
+    }
+  };
+
+  onGestureStart = (event) => {
+    if (!this.compact || this.count < 2) return;
+    // Два пальца = масштабирование, слой в этом жесте не участвует.
+    if (this.activePointers && this.activePointers.size > 1) return;
+    // Only a narrow strip at the right edge — a thumb's width, not a third of the
+    // plate. Everything left of it stays with orbit and pinch.
+    const box = this.stage.getBoundingClientRect();
+    const strip = Math.min(56, Math.max(38, box.width * 0.11));
+    if (event.clientX < box.right - strip) return;
+    // Claim the gesture: otherwise the canvas also reads it as a drag and spins.
+    event.preventDefault();
+    event.stopPropagation();
+    this.gesture = { id: event.pointerId };
+    this.showHint(this.range[1]);
+    this.onGestureMove(event);
+  };
+
+  onGestureMove = (event) => {
+    if (!this.gesture || event.pointerId !== this.gesture.id) return;
+    if (event.cancelable) event.preventDefault();
+    event.stopPropagation();
+    const layer = this.layerAtY(event.clientY);
+    if (layer !== this.range[1]) this.onChange(0, layer, true);
+    this.showHint(layer);
+  };
+
+  onGestureEnd = (event) => {
+    if (!this.gesture || (event && event.pointerId !== this.gesture.id)) return;
+    if (event && event.cancelable) event.preventDefault();
+    this.gesture = null;
+    this.hideHintLater();
   };
 
   onTrackClick(event) {
@@ -11424,6 +11664,14 @@ class LayerSliderControl {
     this.track.removeEventListener('lostpointercapture', this.onLostCapture);
     globalThis.removeEventListener('pointerup', this.onPointerUp);
     globalThis.removeEventListener('pointercancel', this.onPointerUp);
+    if (this.compact) {
+      this.stage.removeEventListener('pointerdown', this.onGestureStart);
+      this.stage.removeEventListener('pointermove', this.onGestureMove);
+      this.stage.removeEventListener('pointerup', this.onGestureEnd);
+      this.stage.removeEventListener('pointercancel', this.onGestureEnd);
+      clearTimeout(this.hideTimer);
+      this.hint?.remove();
+    }
     this.container.remove();
   }
 }

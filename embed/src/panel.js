@@ -2088,6 +2088,9 @@ class LayerSliderControl {
       // Capture phase: the viewer listens on the canvas for orbit, and a drag
       // that starts in the edge strip must not also spin the model. Grabbing the
       // event before it reaches the canvas is what keeps the two apart.
+      stage.addEventListener('pointerdown', this.onTrackPointer, { capture: true });
+      stage.addEventListener('pointerup', this.onTrackPointer, { capture: true });
+      stage.addEventListener('pointercancel', this.onTrackPointer, { capture: true });
       stage.addEventListener('pointerdown', this.onGestureStart, { capture: true });
       stage.addEventListener('pointermove', this.onGestureMove, { capture: true, passive: false });
       stage.addEventListener('pointerup', this.onGestureEnd, true);
@@ -2190,8 +2193,22 @@ class LayerSliderControl {
     this.hideTimer = setTimeout(() => this.hint?.classList.remove('is-visible'), 900);
   }
 
+  onTrackPointer = (event) => {
+    // Держим список активных касаний: два пальца — это зум, его трогать нельзя.
+    if (!this.activePointers) this.activePointers = new Set();
+    if (event.type === 'pointerdown') this.activePointers.add(event.pointerId);
+    else this.activePointers.delete(event.pointerId);
+    if (this.activePointers.size > 1 && this.gesture) {
+      // начался второй палец — отдаём жест вьюеру (pinch), слой больше не крутим
+      this.gesture = null;
+      this.hideHintLater();
+    }
+  };
+
   onGestureStart = (event) => {
     if (!this.compact || this.count < 2) return;
+    // Два пальца = масштабирование, слой в этом жесте не участвует.
+    if (this.activePointers && this.activePointers.size > 1) return;
     // Only a narrow strip at the right edge — a thumb's width, not a third of the
     // plate. Everything left of it stays with orbit and pinch.
     const box = this.stage.getBoundingClientRect();
