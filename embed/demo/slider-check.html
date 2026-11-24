@@ -62,10 +62,22 @@ const panel = mount(document.getElementById('box'), {
     check(Math.abs((trackBox.bottom - (bottomBox.top + bottomBox.height / 2)) / trackBox.height - expectedLow) < 0.04,
       'the bottom knob is centred on the lower bound');
 
-    // Colour: the band is the Orca teal, opaque, and each knob carries a cross.
+    // Colour: the band is filled with the accent, and each knob carries a cross.
+    //
+    // Read against the accent token rather than against a literal. The band's
+    // colour was OrcaSlicer's teal when this was written, and the theme is amber
+    // now -- a hard-coded teal here would fail on a working control and, worse,
+    // would have kept passing if the band had stopped following the accent. What
+    // matters is that the fill is the theme's accent, whatever the theme is.
     const bandColour = getComputedStyle(band).backgroundColor;
-    check(bandColour.includes('17, 137, 128') || bandColour.includes('#118980'),
-      'the band is the reference teal (' + bandColour + ')');
+    const accent = getComputedStyle(document.querySelector('[data-model3d-viewer]'))
+      .getPropertyValue('--m3d-accent').trim();
+    const accentRgb = (() => {
+      const hex = accent.replace('#', '');
+      return [0, 2, 4].map((at) => parseInt(hex.slice(at, at + 2), 16));
+    })();
+    check(bandColour.includes(accentRgb.join(', ')),
+      'the band is filled with the theme accent ' + accent + ' (' + bandColour + ')');
     check(top.querySelector('svg') !== null && bottom.querySelector('svg') !== null,
       'both knobs carry their cross');
 

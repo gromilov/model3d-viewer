@@ -359,6 +359,34 @@ const CHECKS = [
     pixels: { minColours: 16, minNonBackground: 0.02 },
   },
   {
+    // A host embeds the viewer as an element and says how tall it should be with a
+    // `height` attribute. That attribute did nothing -- it was not observed, and a
+    // custom element is `display: inline` until something makes it block, so an
+    // inline box ignored the height anyway. The deployed block on Syndicate asks
+    // for 420px and got 339, with the canvas overflowing its stage.
+    name: 'embed: the element honours the height a host asks for',
+    page: 'height-check.html',
+    size: [600, 760],
+    needs: 'sliced.3mf',
+    expect: /HEIGHTCHECK ok/,
+    reject: /ERR|REJ|FAIL/,
+    pixels: { minColours: 8, minNonBackground: 0.01 },
+  },
+  {
+    // The panel declared its design tokens on its own root, and a custom property
+    // declared on an element wins over an inherited one -- so a host that themed
+    // the viewer by setting them on the element had every value silently ignored
+    // and got our teal on its amber page. This is the check that keeps the panel
+    // a guest in someone else's page rather than a fixed-colour island in it.
+    name: 'embed: a host can theme the panel',
+    page: 'theme.html',
+    size: [400, 460],
+    needs: 'sliced.3mf',
+    expect: /THEMECHECK ok/,
+    reject: /ERR|REJ|FAIL/,
+    pixels: { minColours: 16, minNonBackground: 0.01 },
+  },
+  {
     // The pass loop armed a frame callback and a watchdog timer at once and let both
     // stand. On a plate whose pass outran the watchdog the timer won the race and the
     // abandoned frame callback started a second pass chain beside the first; the

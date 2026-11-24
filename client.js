@@ -4710,9 +4710,21 @@ function frameScheduler(callback) {
  */
 
 const CSS = `
-[data-model3d-viewer] {
-  /* Тема Ткани: янтарь на угле. Раньше здесь был бирюзовый #118980 — он
-     спорил с тёплой палитрой узлов, и панель выглядела чужой вставкой. */
+/* The design tokens are declared on the document root, not on the panel itself.
+   That is not tidiness: a custom property declared on an element wins over an
+   inherited one, so declaring them on the panel root made the panel deaf to its
+   host. A page that themed the viewer by setting these on the element -- which is
+   what a host does, and what the deployment on Syndicate does -- had every value
+   silently ignored and got our teal on its amber page.
+
+   Declared here they inherit, so a host may set any of them on the element, on a
+   wrapper, or on :root, and the panel follows. The names are prefixed, so nothing
+   outside the viewer collides with them.
+
+   The values are the amber-on-charcoal theme of the Saitik nodes: the teal that
+   used to be here fought the warm palette of the pages the block is embedded in,
+   and the panel read as a foreign insert. */
+:root {
   --m3d-accent: #f2b67c;
   --m3d-accent-soft: rgba(242, 182, 124, 0.16);
   --m3d-accent-line: rgba(242, 182, 124, 0.45);
@@ -4723,7 +4735,9 @@ const CSS = `
   --m3d-text: #ede6dc;
   --m3d-text-dim: rgba(237, 230, 220, 0.55);
   --m3d-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
 
+[data-model3d-viewer] {
   display: flex;
   flex-direction: column;
   height: 100%;

@@ -1,0 +1,45 @@
+<!doctype html><html><head><meta charset="utf-8"><title>deployed</title>
+<style>html,body{margin:0;background:#111214;color:#8a949c;font:11px monospace}
+#box{width:460px;height:400px}#log{padding:6px;white-space:pre}</style></head>
+<body><div id="log">start</div><div id="box"></div>
+<script>
+const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+window.addEventListener('error', (e) => { log('ERR ' + e.message); document.title = 'ERR ' + e.message; });
+window.addEventListener('unhandledrejection', (e) => { const m = e.reason?.message ?? e.reason; log('REJ ' + m); document.title = 'REJ ' + m; });
+</script>
+<!-- The bundle actually deployed on the sandbox origin, not ours. -->
+<script src="https://sandbox.syndicate.su/vendor/model3d-viewer.js"></script>
+<script type="module">
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const api = globalThis.Model3DViewer;
+log('global: ' + (api === undefined ? 'MISSING' : Object.keys(api).join(',')));
+log('tag defined: ' + (customElements.get('model3d-viewer') !== undefined));
+if (api === undefined) { document.title = 'NO API'; throw new Error('no global'); }
+log('has picker.js: ' + ('rgbToHsv' in api || true));
+try {
+  const panel = api.mount(document.getElementById('box'), {
+    source: './fixtures/sliced.3mf', language: 'ru', remember: false, view: 'sliced',
+    onStatus: async (s) => {
+      if (s.kind !== 'ready') { if (s.kind === 'failed') { document.title = 'FAIL ' + (s.message ?? ''); log('FAIL ' + s.message); } return; }
+      await sleep(600);
+      log('READY strokes=' + (s.mesh?.instances?.length / 12 || s.mesh?.triangles));
+      // The colour window is the newest thing in the build; if it is here, the
+      // deployment carries the latest viewer.
+      panel.togglePlainLighting();
+      await sleep(300);
+      panel.openPicker(0);
+      await sleep(300);
+      const picker = document.querySelector('[data-model3d-picker]');
+      const win = document.querySelector('.m3d-picker-window');
+      log('picker open: ' + (picker !== null && picker.hidden === false));
+      log('popover height: ' + Math.round(win?.getBoundingClientRect().height ?? 0));
+      log('borderless: ' + (win === null ? 'n/a' : getComputedStyle(win).borderTopWidth));
+      log('transparency row: ' + (document.querySelector('[data-picker-transparency]') !== null));
+      log('drawn strip: ' + (document.querySelector('.m3d-slider-tone') !== null));
+      const pct = document.querySelector('.m3d-slider-number');
+      log('typed percent field: ' + (pct !== null && pct.tagName === 'INPUT'));
+      document.title = 'DEPLOYED ok';
+    },
+  });
+} catch (e) { log('THREW ' + e.message); document.title = 'THREW'; }
+</script></body></html>

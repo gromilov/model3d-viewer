@@ -1,0 +1,48 @@
+<!doctype html><html><head><meta charset="utf-8"><title>theme</title></head><body>
+<div id="box" style="width:360px;height:300px"></div><pre id="o">start</pre>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The host sets the accent on its own wrapper, exactly as the deployed block does
+// on the <model3d-viewer> element.
+//
+// Deliberately a colour the panel does NOT use by default. The default accent was
+// amber for a while, and this page asked for amber -- so it passed without testing
+// anything, because "the host's value arrived" and "our own value was used" look
+// identical when they are the same colour. A green the theme never contains makes
+// the assertion mean what it says.
+const HOST_ACCENT = '#00ff88';
+document.documentElement.style.setProperty('--m3d-accent', HOST_ACCENT);
+const panel = mount(document.getElementById('box'), { source: './fixtures/sliced.3mf', language: 'ru', remember: false, view: 'sliced',
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') return;
+    await sleep(600);
+    const root = document.querySelector('[data-model3d-viewer]');
+    panel.togglePlainLighting(); await sleep(300);
+    panel.openPicker(0); await sleep(300);
+    const ok = document.querySelector('.m3d-picker-button.is-primary');
+    const pressed = document.querySelector('.m3d-btn.is-pressed');
+    const failures = [];
+    const check = (ok, what) => { if (!ok) failures.push(what); };
+    const accent = getComputedStyle(root).getPropertyValue('--m3d-accent').trim();
+    check(accent.toLowerCase() === HOST_ACCENT, 'the panel takes the accent the host set (' + accent + ')');
+    // The token reaching the root is not the same as it reaching a control: the
+    // layer band is filled with it, so its computed colour is the proof.
+    const band = document.querySelector('.m3d-layer-band');
+    const bandColour = band === null ? '' : getComputedStyle(band).backgroundColor;
+    check(bandColour.includes('0, 255, 136'), 'an accent-filled control is the host colour too (' + bandColour + ')');
+    // And the host may theme the rest, not only the accent -- read off the token
+    // the node actually uses. The stats line is dim by design, so it answers to
+    // --m3d-text-dim; setting --m3d-text and reading the stats was reading a token
+    // that element never consults.
+    document.documentElement.style.setProperty('--m3d-text-dim', 'rgba(0, 255, 0, 0.9)');
+    await sleep(120);
+    const text = getComputedStyle(document.querySelector('.m3d-stats')).color;
+    check(text.includes('0, 255, 0'), 'other tokens follow the host as well (' + text + ')');
+    check(document.querySelectorAll('style[data-model3d-styles]').length === 1,
+      'the stylesheet is still injected once');
+    document.getElementById('o').textContent =
+      'accent: ' + accent + '\nband: ' + bandColour + '\nstats: ' + text;
+    document.title = failures.length === 0 ? 'THEMECHECK ok' : 'FAIL ' + failures.join('; ');
+  } });
+</script></body></html>

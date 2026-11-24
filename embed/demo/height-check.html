@@ -1,0 +1,50 @@
+<!doctype html><html><head><meta charset="utf-8"><title>h</title>
+<style>body{margin:0;font:11px monospace}</style></head><body>
+<pre id="o">start</pre>
+<script type="module">
+import { defineModelViewer } from '../dist/model3d-viewer.mjs';
+defineModelViewer();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// The deployed Saitik block sets `height` as an attribute and expects the element
+// to be that tall. Two questions, both asserted: does the attribute do anything,
+// and is the element's box the size the host asked for.
+const failures = [];
+const check = (ok, what) => { if (!ok) failures.push(what); };
+
+const make = (attrs) => {
+  const el = document.createElement('model3d-viewer');
+  for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
+  document.body.append(el);
+  return el;
+};
+const a = make({ src: './fixtures/sliced.3mf', language: 'ru' });
+await sleep(2200);
+check(getComputedStyle(a).display === 'block', 'a custom element that draws a canvas is block-level');
+const bare = a.getBoundingClientRect().height;
+
+const b = make({ src: './fixtures/sliced.3mf', language: 'ru', height: '420' });
+await sleep(2200);
+const sized = b.getBoundingClientRect();
+check(Math.round(sized.height) === 420, 'height="420" makes it 420px (got ' + Math.round(sized.height) + ')');
+const canvas = b.querySelector('canvas');
+check(canvas !== null && Math.round(canvas.getBoundingClientRect().height) <= 420,
+  'the canvas fits inside the box the host asked for');
+
+// No height: the element takes its own, and must still be a real box.
+check(bare > 0, 'without a height it still has one of its own (' + Math.round(bare) + 'px)');
+
+// A height with a unit is taken as written, and clearing it removes the style.
+b.setAttribute('height', '50%');
+check(b.style.height === '50%', 'a height with a unit is used as written (' + b.style.height + ')');
+b.removeAttribute('height');
+check(b.style.height === '' || b.style.height === 'auto', 'clearing the attribute clears the height');
+await sleep(300);
+
+document.getElementById('o').textContent =
+  'display: ' + getComputedStyle(a).display + '\n'
+  + 'no height: ' + Math.round(bare) + 'px\n'
+  + 'height=420: ' + Math.round(sized.height) + 'px\n'
+  + 'observed: ' + JSON.stringify(a.constructor.observedAttributes);
+document.title = failures.length === 0 ? 'HEIGHTCHECK ok' : 'FAIL ' + failures.join('; ');
+</script></body></html>

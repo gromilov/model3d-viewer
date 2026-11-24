@@ -51,12 +51,23 @@ export class ModelViewerElement extends ElementBase {
   /** Overrides the `src` attribute when set before connection. */
   source = undefined;
 
+  // A custom element is `display: inline` until something says otherwise, and an
+  // inline box ignores the height of the panel inside it: the element reported
+  // itself 339 pixels tall inside a stage that had asked for 420, and the canvas
+  // overflowed the host's box. A viewer is a block-level object -- it fills the
+  // width it is given and states its own height -- so this belongs on the element
+  // rather than on every host's stylesheet.
   static get observedAttributes() {
-    return ['src', 'language', 'view'];
+    return ['src', 'language', 'view', 'height'];
   }
 
   connectedCallback() {
     if (this.panel !== null) return;
+    // `display: block` is not cosmetic: an inline box ignores a height, so the
+    // attribute below would have no effect without it, and the panel inside an
+    // inline box reports the wrong size to everything that measures it.
+    this.style.display = 'block';
+    this.applyHeight();
     this.panel = new ViewerPanel(this, {
       source: this.source ?? this.getAttribute('src') ?? undefined,
       language: this.getAttribute('language') ?? undefined,
@@ -69,6 +80,32 @@ export class ModelViewerElement extends ElementBase {
         }
       },
     });
+  }
+
+  /**
+   * Honour the `height` attribute.
+   *
+   * A host embedding the viewer in a page it controls has nowhere else to say how
+   * tall the block should be, and `style="height: 420px"` would put the number in
+   * the host's stylesheet rather than in the markup it already writes. A bare
+   * number means pixels, which is what every other length attribute on the web
+   * does when it omits the unit.
+   *
+   * Set on the element, as a style, rather than by writing to the panel's own box:
+   * the panel computes its layout from the host's height, and a host attribute that
+   * merely changed the element's outer box would leave the canvas at its old size.
+   */
+  applyHeight() {
+    const raw = this.getAttribute('height');
+    if (raw === null || raw === '') {
+      this.style.removeProperty('height');
+      return;
+    }
+    const text = String(raw).trim();
+    // A bare number is pixels; anything with a unit is taken as written, so
+    // `100%` and `60vh` work without special cases.
+    const value = /^\d+(\.\d+)?$/.test(text) ? `${text}px` : text;
+    this.style.height = value;
   }
 
   disconnectedCallback() {
@@ -85,7 +122,14 @@ export class ModelViewerElement extends ElementBase {
    * could not do anyway -- a canvas keeps one WebGL context for its lifetime.
    */
   attributeChangedCallback(name, previous, next) {
-    if (this.panel === null || previous === next) return;
+    if (previous === next) return;
+    // The height may be set, changed or cleared before or after connection, and it
+    // is a style rather than a rebuild, so it is handled before the panel guard.
+    if (name === 'height') {
+      this.applyHeight();
+      return;
+    }
+    if (this.panel === null) return;
     if (name === 'src') {
       this.panel.dispose();
       this.panel = null;

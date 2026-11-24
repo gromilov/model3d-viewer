@@ -4833,9 +4833,21 @@ function frameScheduler(callback) {
  */
 
 const CSS = `
-[data-model3d-viewer] {
-  /* Тема Ткани: янтарь на угле. Раньше здесь был бирюзовый #118980 — он
-     спорил с тёплой палитрой узлов, и панель выглядела чужой вставкой. */
+/* The design tokens are declared on the document root, not on the panel itself.
+   That is not tidiness: a custom property declared on an element wins over an
+   inherited one, so declaring them on the panel root made the panel deaf to its
+   host. A page that themed the viewer by setting these on the element -- which is
+   what a host does, and what the deployment on Syndicate does -- had every value
+   silently ignored and got our teal on its amber page.
+
+   Declared here they inherit, so a host may set any of them on the element, on a
+   wrapper, or on :root, and the panel follows. The names are prefixed, so nothing
+   outside the viewer collides with them.
+
+   The values are the amber-on-charcoal theme of the Saitik nodes: the teal that
+   used to be here fought the warm palette of the pages the block is embedded in,
+   and the panel read as a foreign insert. */
+:root {
   --m3d-accent: #f2b67c;
   --m3d-accent-soft: rgba(242, 182, 124, 0.16);
   --m3d-accent-line: rgba(242, 182, 124, 0.45);
@@ -4846,7 +4858,9 @@ const CSS = `
   --m3d-text: #ede6dc;
   --m3d-text-dim: rgba(237, 230, 220, 0.55);
   --m3d-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
 
+[data-model3d-viewer] {
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -11869,12 +11883,23 @@ class ModelViewerElement extends ElementBase {
   /** Overrides the `src` attribute when set before connection. */
   source = undefined;
 
+  // A custom element is `display: inline` until something says otherwise, and an
+  // inline box ignores the height of the panel inside it: the element reported
+  // itself 339 pixels tall inside a stage that had asked for 420, and the canvas
+  // overflowed the host's box. A viewer is a block-level object -- it fills the
+  // width it is given and states its own height -- so this belongs on the element
+  // rather than on every host's stylesheet.
   static get observedAttributes() {
-    return ['src', 'language', 'view'];
+    return ['src', 'language', 'view', 'height'];
   }
 
   connectedCallback() {
     if (this.panel !== null) return;
+    // `display: block` is not cosmetic: an inline box ignores a height, so the
+    // attribute below would have no effect without it, and the panel inside an
+    // inline box reports the wrong size to everything that measures it.
+    this.style.display = 'block';
+    this.applyHeight();
     this.panel = new ViewerPanel(this, {
       source: this.source ?? this.getAttribute('src') ?? undefined,
       language: this.getAttribute('language') ?? undefined,
@@ -11887,6 +11912,32 @@ class ModelViewerElement extends ElementBase {
         }
       },
     });
+  }
+
+  /**
+   * Honour the `height` attribute.
+   *
+   * A host embedding the viewer in a page it controls has nowhere else to say how
+   * tall the block should be, and `style="height: 420px"` would put the number in
+   * the host's stylesheet rather than in the markup it already writes. A bare
+   * number means pixels, which is what every other length attribute on the web
+   * does when it omits the unit.
+   *
+   * Set on the element, as a style, rather than by writing to the panel's own box:
+   * the panel computes its layout from the host's height, and a host attribute that
+   * merely changed the element's outer box would leave the canvas at its old size.
+   */
+  applyHeight() {
+    const raw = this.getAttribute('height');
+    if (raw === null || raw === '') {
+      this.style.removeProperty('height');
+      return;
+    }
+    const text = String(raw).trim();
+    // A bare number is pixels; anything with a unit is taken as written, so
+    // `100%` and `60vh` work without special cases.
+    const value = /^\d+(\.\d+)?$/.test(text) ? `${text}px` : text;
+    this.style.height = value;
   }
 
   disconnectedCallback() {
@@ -11903,7 +11954,14 @@ class ModelViewerElement extends ElementBase {
    * could not do anyway -- a canvas keeps one WebGL context for its lifetime.
    */
   attributeChangedCallback(name, previous, next) {
-    if (this.panel === null || previous === next) return;
+    if (previous === next) return;
+    // The height may be set, changed or cleared before or after connection, and it
+    // is a style rather than a rebuild, so it is handled before the panel guard.
+    if (name === 'height') {
+      this.applyHeight();
+      return;
+    }
+    if (this.panel === null) return;
     if (name === 'src') {
       this.panel.dispose();
       this.panel = null;
