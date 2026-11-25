@@ -71,6 +71,14 @@ export const ICONS = {
   // outline of a shape instead of a transport control.
   play: 'M5 3l7 5-7 5z',
   pause: 'M5 3h2.5v10H5z M8.5 3H11v10H8.5z',
+  // A turntable: an open arc with an arrowhead and a body sitting inside it, so
+  // it reads as "go round the object" rather than as the reset arrow it is
+  // otherwise identical to.
+  motion: 'M12.6 8a4.6 4.6 0 1 1-1.4-3.3 M12.6 2.2v3h-3 M8 6.4l2 1.6-2 1.6z',
+  // A plus, for recording one more view.
+  plus: 'M8 3.5v9 M3.5 8h9',
+  // A cross in a small frame: delete this view.
+  trash: 'M3 4.5h10 M6.2 4.5V3h3.6v1.5 M4.4 4.5l.6 8h6l.6-8 M6.6 7v3.4 M9.4 7v3.4',
   // A cross: dismissing a window. Two strokes rather than a glyph, so it stays
   // crisp at 10 pixels inside a colour window's head.
   close: 'M4 4l8 8 M12 4l-8 8',
@@ -141,7 +149,11 @@ export function icon(name, size = 16) {
 export function el(tag, attributes = {}, children = []) {
   const node = document.createElement(tag);
 
-  for (const [key, value] of Object.entries(attributes)) {
+  // A default parameter only covers `undefined`, and `el('span', null, …)` is the
+  // natural way to say "no attributes" -- it read as working until it threw
+  // "Cannot convert undefined or null to object" from this line. Tolerated here
+  // rather than corrected at each of the call sites.
+  for (const [key, value] of Object.entries(attributes ?? {})) {
     if (value === undefined || value === null) continue;
     if (key === 'style') {
       Object.assign(node.style, value);
@@ -179,6 +191,47 @@ export function append(node, children) {
     }
   }
   return node;
+}
+
+/**
+ * Position a popover against the control that opened it.
+ *
+ * Shared by the colour window and the motion window, because the rule is the
+ * same and a second copy of it would drift: align with the anchor, pull the box
+ * back inside the host's bounds on whichever side it overflows, open upwards when
+ * there is no room below, and cap the height to the host so a short sidebar
+ * scrolls the popover rather than hiding its buttons.
+ *
+ * Both measurements are taken while the node is visible: a hidden element reports
+ * a zero-sized box, and a popover placed from that lands in the corner.
+ *
+ * @param node - the popover, already shown and already in the document.
+ * @param anchor - the control it belongs to; the host's corner when omitted.
+ * @param gap - space between the anchor and the popover.
+ * @param margin - space kept from the host's edges.
+ */
+export function placePopover(node, anchor, gap = 6, margin = 8) {
+  const host = node.parentElement;
+  if (host === null) return;
+  const hostBox = host.getBoundingClientRect();
+  const box = node.getBoundingClientRect();
+
+  let left = margin;
+  let top = margin;
+  if (anchor !== undefined && anchor !== null) {
+    const a = anchor.getBoundingClientRect();
+    left = a.left - hostBox.left;
+    left = Math.min(left, hostBox.width - box.width - margin);
+    left = Math.max(margin, left);
+    const below = a.bottom - hostBox.top + gap;
+    const above = a.top - hostBox.top - box.height - gap;
+    if (below + box.height <= hostBox.height - margin) top = below;
+    else if (above >= margin) top = above;
+    else top = Math.max(margin, Math.min(below, hostBox.height - box.height - margin));
+  }
+  node.style.left = `${Math.round(left)}px`;
+  node.style.top = `${Math.round(top)}px`;
+  node.style.maxHeight = `${Math.round(hostBox.height - margin * 2)}px`;
 }
 
 /** Remove every child, keeping the element itself (and its listeners). */

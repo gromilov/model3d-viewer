@@ -250,6 +250,268 @@ const CSS = `
   outline-offset: 2px;
 }
 
+/* ---------------------------------------------------------- motion window -- */
+
+/* The same popover shape as the colour window -- no frame, a downward shadow --
+   because they are the same kind of thing: a panel of settings that opens beside
+   the control that owns it and does not cover the scene. */
+[data-model3d-viewer] .m3d-motion {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  box-sizing: border-box;
+  min-height: 0;
+}
+[data-model3d-viewer] .m3d-motion-window {
+  display: flex;
+  flex-direction: column;
+  width: 244px;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  padding: 9px;
+  border-radius: 5px;
+  border: none;
+  background: var(--m3d-surface-solid);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  outline: none;
+}
+[data-model3d-viewer] .m3d-motion-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--m3d-surface-solid);
+  padding-bottom: 2px;
+}
+[data-model3d-viewer] .m3d-motion-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--m3d-text-dim);
+}
+
+/* Two settings groups, separated by the one hairline in the window: they are
+   different kinds of motion, not two halves of one form. */
+[data-model3d-viewer] .m3d-motion-section + .m3d-motion-section {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--m3d-hairline);
+}
+
+[data-model3d-viewer] .m3d-motion-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 10px;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background 120ms, color 120ms;
+}
+[data-model3d-viewer] .m3d-motion-toggle:hover { background: rgba(255, 255, 255, 0.13); }
+[data-model3d-viewer] .m3d-motion-toggle.is-on {
+  background: var(--m3d-accent-soft);
+  color: var(--m3d-accent);
+}
+[data-model3d-viewer] .m3d-motion-toggle-state {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: inherit;
+  opacity: 0.75;
+}
+
+[data-model3d-viewer] .m3d-motion-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+[data-model3d-viewer] .m3d-motion-row.is-head { margin-top: 0; }
+[data-model3d-viewer] .m3d-motion-label {
+  flex: 0 0 auto;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--m3d-text-dim);
+  min-width: 62px;
+}
+[data-model3d-viewer] .m3d-motion-value,
+[data-model3d-viewer] .m3d-motion-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 9px;
+  color: var(--m3d-text-dim);
+}
+[data-model3d-viewer] .m3d-motion-count { margin-left: auto; }
+[data-model3d-viewer] .m3d-motion-unit {
+  font-size: 9px;
+  color: var(--m3d-text-dim);
+}
+
+[data-model3d-viewer] .m3d-motion-speed {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 2px;
+  background: var(--m3d-hairline-strong);
+  border-radius: 1px;
+  outline: none;
+  cursor: pointer;
+}
+[data-model3d-viewer] .m3d-motion-speed::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--m3d-text);
+  border: none;
+  cursor: pointer;
+}
+
+[data-model3d-viewer] .m3d-motion-number {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  box-sizing: border-box;
+}
+[data-model3d-viewer] .m3d-motion-number:focus {
+  box-shadow: 0 0 0 1px var(--m3d-accent-line);
+}
+
+/* The recorded views. Scrolls on its own rather than growing the window: a tour
+   of twelve would otherwise push the buttons off a short sidebar. */
+[data-model3d-viewer] .m3d-motion-views {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  max-height: 132px;
+  overflow-y: auto;
+}
+[data-model3d-viewer] .m3d-motion-view {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+}
+[data-model3d-viewer] .m3d-motion-view-index {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: center;
+  font-size: 9px;
+  color: var(--m3d-accent);
+  font-variant-numeric: tabular-nums;
+}
+[data-model3d-viewer] .m3d-motion-view-go {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-model3d-viewer] .m3d-motion-view-go:hover { color: var(--m3d-accent); }
+[data-model3d-viewer] .m3d-motion-empty {
+  margin: 2px 0 0;
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--m3d-text-dim);
+}
+
+[data-model3d-viewer] .m3d-motion-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 1 1 0;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+[data-model3d-viewer] .m3d-motion-button:hover { background: rgba(255, 255, 255, 0.14); }
+[data-model3d-viewer] .m3d-motion-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+[data-model3d-viewer] .m3d-motion-button:disabled:hover { background: rgba(255, 255, 255, 0.07); }
+[data-model3d-viewer] .m3d-motion-button.is-primary {
+  background: var(--m3d-accent);
+  color: #14100c;
+  font-weight: 600;
+}
+[data-model3d-viewer] .m3d-motion-button.is-primary:hover { background: var(--m3d-accent); filter: brightness(1.08); }
+[data-model3d-viewer] .m3d-motion-button.is-playing {
+  background: var(--m3d-accent-soft);
+  color: var(--m3d-accent);
+}
+
+[data-model3d-viewer] .m3d-motion-icon {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--m3d-text-dim);
+  cursor: pointer;
+}
+[data-model3d-viewer] .m3d-motion-icon:hover {
+  background: var(--m3d-hairline);
+  color: var(--m3d-text);
+}
+
 /* ---------------------------------------------------------- colour window -- */
 
 /* A popover, not a screen. It is anchored under the swatch that opened it and

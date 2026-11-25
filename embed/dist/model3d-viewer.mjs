@@ -75,7 +75,23 @@ const LOCALES = {
     "picker.cancel": "Cancel",
     "controls.play": "Play the print",
     "controls.playStop": "Stop the playback",
-    "status.printingLayer": "Printing layer {layer} of {total}"
+    "status.printingLayer": "Printing layer {layer} of {total}",
+    "motion.title": "Motion",
+    "motion.spin": "Turntable",
+    "motion.on": "on",
+    "motion.off": "off",
+    "motion.speed": "Speed",
+    "motion.views": "Views",
+    "motion.viewCount": "{count} recorded",
+    "motion.noViews": "Record a view to start a tour",
+    "motion.record": "Add view",
+    "motion.playTour": "Play tour",
+    "motion.stop": "Stop",
+    "motion.duration": "Duration",
+    "motion.ms": "ms",
+    "motion.goTo": "Go to this view",
+    "motion.forget": "Remove this view",
+    "motion.tooMany": "A tour holds at most {max} views"
   },
   ru: {
     "meta": {
@@ -145,7 +161,23 @@ const LOCALES = {
     "picker.cancel": "Отмена",
     "controls.play": "Проиграть печать",
     "controls.playStop": "Остановить проигрывание",
-    "status.printingLayer": "Печать слоя {layer} из {total}"
+    "status.printingLayer": "Печать слоя {layer} из {total}",
+    "motion.title": "Движение",
+    "motion.spin": "Вращение",
+    "motion.on": "вкл",
+    "motion.off": "выкл",
+    "motion.speed": "Скорость",
+    "motion.views": "Ракурсы",
+    "motion.viewCount": "записано: {count}",
+    "motion.noViews": "Запишите ракурс, чтобы начать облёт",
+    "motion.record": "Добавить ракурс",
+    "motion.playTour": "Облететь",
+    "motion.stop": "Остановить",
+    "motion.duration": "Длительность",
+    "motion.ms": "мс",
+    "motion.goTo": "Перейти к этому ракурсу",
+    "motion.forget": "Удалить ракурс",
+    "motion.tooMany": "В облёте не больше {max} ракурсов"
   },
 };
 
@@ -4811,6 +4843,14 @@ const ICONS = {
   // outline of a shape instead of a transport control.
   play: 'M5 3l7 5-7 5z',
   pause: 'M5 3h2.5v10H5z M8.5 3H11v10H8.5z',
+  // A turntable: an open arc with an arrowhead and a body sitting inside it, so
+  // it reads as "go round the object" rather than as the reset arrow it is
+  // otherwise identical to.
+  motion: 'M12.6 8a4.6 4.6 0 1 1-1.4-3.3 M12.6 2.2v3h-3 M8 6.4l2 1.6-2 1.6z',
+  // A plus, for recording one more view.
+  plus: 'M8 3.5v9 M3.5 8h9',
+  // A cross in a small frame: delete this view.
+  trash: 'M3 4.5h10 M6.2 4.5V3h3.6v1.5 M4.4 4.5l.6 8h6l.6-8 M6.6 7v3.4 M9.4 7v3.4',
   // A cross: dismissing a window. Two strokes rather than a glyph, so it stays
   // crisp at 10 pixels inside a colour window's head.
   close: 'M4 4l8 8 M12 4l-8 8',
@@ -4881,7 +4921,11 @@ function icon(name, size = 16) {
 function el(tag, attributes = {}, children = []) {
   const node = document.createElement(tag);
 
-  for (const [key, value] of Object.entries(attributes)) {
+  // A default parameter only covers `undefined`, and `el('span', null, …)` is the
+  // natural way to say "no attributes" -- it read as working until it threw
+  // "Cannot convert undefined or null to object" from this line. Tolerated here
+  // rather than corrected at each of the call sites.
+  for (const [key, value] of Object.entries(attributes ?? {})) {
     if (value === undefined || value === null) continue;
     if (key === 'style') {
       Object.assign(node.style, value);
@@ -4919,6 +4963,47 @@ function append(node, children) {
     }
   }
   return node;
+}
+
+/**
+ * Position a popover against the control that opened it.
+ *
+ * Shared by the colour window and the motion window, because the rule is the
+ * same and a second copy of it would drift: align with the anchor, pull the box
+ * back inside the host's bounds on whichever side it overflows, open upwards when
+ * there is no room below, and cap the height to the host so a short sidebar
+ * scrolls the popover rather than hiding its buttons.
+ *
+ * Both measurements are taken while the node is visible: a hidden element reports
+ * a zero-sized box, and a popover placed from that lands in the corner.
+ *
+ * @param node - the popover, already shown and already in the document.
+ * @param anchor - the control it belongs to; the host's corner when omitted.
+ * @param gap - space between the anchor and the popover.
+ * @param margin - space kept from the host's edges.
+ */
+function placePopover(node, anchor, gap = 6, margin = 8) {
+  const host = node.parentElement;
+  if (host === null) return;
+  const hostBox = host.getBoundingClientRect();
+  const box = node.getBoundingClientRect();
+
+  let left = margin;
+  let top = margin;
+  if (anchor !== undefined && anchor !== null) {
+    const a = anchor.getBoundingClientRect();
+    left = a.left - hostBox.left;
+    left = Math.min(left, hostBox.width - box.width - margin);
+    left = Math.max(margin, left);
+    const below = a.bottom - hostBox.top + gap;
+    const above = a.top - hostBox.top - box.height - gap;
+    if (below + box.height <= hostBox.height - margin) top = below;
+    else if (above >= margin) top = above;
+    else top = Math.max(margin, Math.min(below, hostBox.height - box.height - margin));
+  }
+  node.style.left = `${Math.round(left)}px`;
+  node.style.top = `${Math.round(top)}px`;
+  node.style.maxHeight = `${Math.round(hostBox.height - margin * 2)}px`;
 }
 
 /** Remove every child, keeping the element itself (and its listeners). */
@@ -5198,6 +5283,268 @@ const CSS = `
 [data-model3d-viewer] .m3d-swatch:focus-visible {
   outline: 1px solid var(--m3d-accent-line);
   outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------- motion window -- */
+
+/* The same popover shape as the colour window -- no frame, a downward shadow --
+   because they are the same kind of thing: a panel of settings that opens beside
+   the control that owns it and does not cover the scene. */
+[data-model3d-viewer] .m3d-motion {
+  position: absolute;
+  z-index: 40;
+  display: flex;
+  box-sizing: border-box;
+  min-height: 0;
+}
+[data-model3d-viewer] .m3d-motion-window {
+  display: flex;
+  flex-direction: column;
+  width: 244px;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  box-sizing: border-box;
+  padding: 9px;
+  border-radius: 5px;
+  border: none;
+  background: var(--m3d-surface-solid);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5);
+  outline: none;
+}
+[data-model3d-viewer] .m3d-motion-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--m3d-surface-solid);
+  padding-bottom: 2px;
+}
+[data-model3d-viewer] .m3d-motion-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--m3d-text-dim);
+}
+
+/* Two settings groups, separated by the one hairline in the window: they are
+   different kinds of motion, not two halves of one form. */
+[data-model3d-viewer] .m3d-motion-section + .m3d-motion-section {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--m3d-hairline);
+}
+
+[data-model3d-viewer] .m3d-motion-toggle {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 10px;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition: background 120ms, color 120ms;
+}
+[data-model3d-viewer] .m3d-motion-toggle:hover { background: rgba(255, 255, 255, 0.13); }
+[data-model3d-viewer] .m3d-motion-toggle.is-on {
+  background: var(--m3d-accent-soft);
+  color: var(--m3d-accent);
+}
+[data-model3d-viewer] .m3d-motion-toggle-state {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: inherit;
+  opacity: 0.75;
+}
+
+[data-model3d-viewer] .m3d-motion-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+[data-model3d-viewer] .m3d-motion-row.is-head { margin-top: 0; }
+[data-model3d-viewer] .m3d-motion-label {
+  flex: 0 0 auto;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--m3d-text-dim);
+  min-width: 62px;
+}
+[data-model3d-viewer] .m3d-motion-value,
+[data-model3d-viewer] .m3d-motion-count {
+  font-variant-numeric: tabular-nums;
+  font-size: 9px;
+  color: var(--m3d-text-dim);
+}
+[data-model3d-viewer] .m3d-motion-count { margin-left: auto; }
+[data-model3d-viewer] .m3d-motion-unit {
+  font-size: 9px;
+  color: var(--m3d-text-dim);
+}
+
+[data-model3d-viewer] .m3d-motion-speed {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 2px;
+  background: var(--m3d-hairline-strong);
+  border-radius: 1px;
+  outline: none;
+  cursor: pointer;
+}
+[data-model3d-viewer] .m3d-motion-speed::-webkit-slider-thumb {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--m3d-text);
+  border: none;
+  cursor: pointer;
+}
+
+[data-model3d-viewer] .m3d-motion-number {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 24px;
+  padding: 0 7px;
+  border: none;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+  box-sizing: border-box;
+}
+[data-model3d-viewer] .m3d-motion-number:focus {
+  box-shadow: 0 0 0 1px var(--m3d-accent-line);
+}
+
+/* The recorded views. Scrolls on its own rather than growing the window: a tour
+   of twelve would otherwise push the buttons off a short sidebar. */
+[data-model3d-viewer] .m3d-motion-views {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  max-height: 132px;
+  overflow-y: auto;
+}
+[data-model3d-viewer] .m3d-motion-view {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+}
+[data-model3d-viewer] .m3d-motion-view-index {
+  flex: 0 0 auto;
+  width: 20px;
+  text-align: center;
+  font-size: 9px;
+  color: var(--m3d-accent);
+  font-variant-numeric: tabular-nums;
+}
+[data-model3d-viewer] .m3d-motion-view-go {
+  appearance: none;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-model3d-viewer] .m3d-motion-view-go:hover { color: var(--m3d-accent); }
+[data-model3d-viewer] .m3d-motion-empty {
+  margin: 2px 0 0;
+  font-size: 9px;
+  line-height: 1.4;
+  color: var(--m3d-text-dim);
+}
+
+[data-model3d-viewer] .m3d-motion-button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 1 1 0;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--m3d-text);
+  font-family: var(--m3d-mono);
+  font-size: 10px;
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+[data-model3d-viewer] .m3d-motion-button:hover { background: rgba(255, 255, 255, 0.14); }
+[data-model3d-viewer] .m3d-motion-button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+[data-model3d-viewer] .m3d-motion-button:disabled:hover { background: rgba(255, 255, 255, 0.07); }
+[data-model3d-viewer] .m3d-motion-button.is-primary {
+  background: var(--m3d-accent);
+  color: #14100c;
+  font-weight: 600;
+}
+[data-model3d-viewer] .m3d-motion-button.is-primary:hover { background: var(--m3d-accent); filter: brightness(1.08); }
+[data-model3d-viewer] .m3d-motion-button.is-playing {
+  background: var(--m3d-accent-soft);
+  color: var(--m3d-accent);
+}
+
+[data-model3d-viewer] .m3d-motion-icon {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--m3d-text-dim);
+  cursor: pointer;
+}
+[data-model3d-viewer] .m3d-motion-icon:hover {
+  background: var(--m3d-hairline);
+  color: var(--m3d-text);
 }
 
 /* ---------------------------------------------------------- colour window -- */
@@ -6183,8 +6530,27 @@ function isModelName(name) {
  */
 const STORE_VERSION = 1;
 
+/**
+ * How many recorded views a tour may keep.
+ *
+ * A tour is a handful of angles someone picked by hand; past a dozen it is a
+ * slideshow nobody watches, and the list would push the popover's own controls
+ * off a short sidebar. The cap is enforced on the way in as well as on the way
+ * out, so a hand-edited blob cannot make the panel slow to open.
+ */
+const MAX_TOUR_VIEWS = 12;
+
 /** The prefix on every key, so a host page's own storage cannot collide with it. */
 const KEY_PREFIX = 'model3d:file:';
+
+/**
+ * How long a tour takes, in milliseconds, when nothing is stored.
+ *
+ * Four seconds for however many views: a three-view turntable is a slow turn, a
+ * ten-view one is brisk. Scaled by the count instead would make a long tour
+ * unwatchable, and the panel lets the number be typed anyway.
+ */
+const DEFAULT_TOUR_DURATION = 4000;
 
 /**
  * A store that keeps nothing.
@@ -6408,6 +6774,33 @@ function validateSnapshot(raw) {
   }
 
   if (typeof raw.lightLevel === 'number') out.lightLevel = clampNumber(raw.lightLevel, 0.2, 2, 1);
+
+  // The tour: a list of recorded cameras and how long to fly through them. Stored
+  // per file because it is a judgement about *this* print -- which corners are
+  // worth showing is different for a carabiner and a phone stand -- and because a
+  // tour that survived a change of file would fly to angles that mean nothing on
+  // the next one.
+  if (Array.isArray(raw.tour)) {
+    const tour = [];
+    for (const entry of raw.tour.slice(0, MAX_TOUR_VIEWS)) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      if (!Number.isFinite(entry.yaw) || !Number.isFinite(entry.pitch)) continue;
+      const view = { yaw: entry.yaw, pitch: entry.pitch };
+      if (Number.isFinite(entry.zoom) && entry.zoom > 0) view.zoom = entry.zoom;
+      if (Array.isArray(entry.pan) && entry.pan.length === 3
+        && entry.pan.every((value) => Number.isFinite(value))) {
+        view.pan = [entry.pan[0], entry.pan[1], entry.pan[2]];
+      }
+      tour.push(view);
+    }
+    if (tour.length > 0) out.tour = tour;
+  }
+  if (typeof raw.tourDuration === 'number') {
+    out.tourDuration = clampNumber(raw.tourDuration, 800, 60000, 4000);
+  }
+  if (typeof raw.spinSpeed === 'number') {
+    out.spinSpeed = clampNumber(raw.spinSpeed, 0.05, 3, 0.4);
+  }
 
   if (typeof raw.paletteOverrides === 'object' && raw.paletteOverrides !== null) {
     const overrides = {};
@@ -7043,32 +7436,7 @@ class ColorPickerControl {
    * leaves the sidebar is not a popover, it is a clipped window.
    */
   place(anchor) {
-    const host = this.node.parentElement;
-    if (host === null) return;
-    const hostBox = host.getBoundingClientRect();
-    const box = this.node.getBoundingClientRect();
-    const gap = 6;
-    const margin = 8;
-
-    let left = margin;
-    let top = margin;
-    if (anchor !== undefined && anchor !== null) {
-      const a = anchor.getBoundingClientRect();
-      left = a.left - hostBox.left;
-      // The swatch is small; centre the popover on it, then pull it back inside.
-      left = Math.min(left, hostBox.width - box.width - margin);
-      left = Math.max(margin, left);
-      const below = a.bottom - hostBox.top + gap;
-      const above = a.top - hostBox.top - box.height - gap;
-      // Below if it fits, above if that is where the room is, and pinned inside
-      // the panel when neither side fits -- which is the short-sidebar case.
-      if (below + box.height <= hostBox.height - margin) top = below;
-      else if (above >= margin) top = above;
-      else top = Math.max(margin, Math.min(below, hostBox.height - box.height - margin));
-    }
-    this.node.style.left = `${Math.round(left)}px`;
-    this.node.style.top = `${Math.round(top)}px`;
-    this.node.style.maxHeight = `${Math.round(hostBox.height - margin * 2)}px`;
+    placePopover(this.node, anchor);
   }
 
   /** Fill the preset row from the file's palette. */
@@ -7166,6 +7534,388 @@ class ColorPickerControl {
   /** Remove the window from the document. */
   dispose() {
     this.node.remove();
+  }
+}
+
+
+/* -------------------------------------------------------------------- motion */
+/**
+ * Camera motion: a turntable, and a sequence of your own views.
+ *
+ * Two things, because they answer two different questions a person asks of a
+ * print. A turntable answers "what does this look like from everywhere" and needs
+ * no setup at all. A sequence of views answers "show me these three corners in
+ * this order, slowly" -- the shot someone wants for a listing, a handover or a
+ * message, and the one thing a turntable cannot do.
+ *
+ * The design decisions that matter:
+ *
+ *   - **A view is a whole camera**: angle, distance and shift. Storing the angle
+ *     alone would fly between corners while leaving the zoom wherever the last
+ *     view put it, which looks like the model changing size for no reason.
+ *   - **Interpolation is eased, not linear**, and the easing is applied across the
+ *     whole path rather than between each pair. Linear motion starts and stops
+ *     with a jolt, and per-segment easing makes a three-view tour pulse at every
+ *     corner instead of flowing round it.
+ *   - **The turntable turns the camera, not the model.** Rotating the mesh would
+ *     take the build plate and the lighting with it, and a preview whose key light
+ *     swings around is telling you something untrue about the material.
+ *   - **Nothing here runs on a timer of its own**: one step function is driven from
+ *     the same frame-with-watchdog schedule the player uses, so a background tab
+ *     cannot leave a loop spinning.
+ */
+
+
+/** Shortest sensible tour, in milliseconds. */
+const MIN_DURATION = 800;
+
+/** Longest, so a typo cannot make a tour that appears to hang. */
+const MAX_DURATION = 60000;
+
+/** The shortest gap between two views in a tour. */
+const MIN_HOLD = 0;
+
+/**
+ * Ease a fraction of a tour.
+ *
+ * Smoothstep: zero velocity at both ends, which is what makes a sequence of still
+ * views feel like a camera move rather than a slideshow. Applied to the whole path
+ * rather than per segment -- see the note at the top of the file.
+ *
+ * @param t - progress through the tour, 0..1.
+ * @returns the eased progress, 0..1.
+ */
+function easeTour(t) {
+  const x = Math.min(1, Math.max(0, t));
+  return x * x * (3 - 2 * x);
+}
+
+/**
+ * Interpolate two angles the short way round.
+ *
+ * A yaw of 350° to 10° is a 20° turn, not a 340° one, and takeing the long way is
+ * the classic way an orbit animation looks broken at one particular angle. The
+ * same function covers pitch, which is clamped short of the poles and so never
+ * wraps.
+ *
+ * @param from - start angle, radians.
+ * @param to - end angle, radians.
+ * @param t - 0..1.
+ */
+function lerpAngle(from, to, t) {
+  const full = Math.PI * 2;
+  let delta = (to - from) % full;
+  if (delta > Math.PI) delta -= full;
+  if (delta < -Math.PI) delta += full;
+  return from + delta * t;
+}
+
+/** Linear interpolation, for the parts of a camera that do not wrap. */
+function lerp(from, to, t) {
+  return from + (to - from) * t;
+}
+
+/**
+ * Blend two cameras.
+ *
+ * @param from - the starting camera.
+ * @param to - the ending camera.
+ * @param t - 0..1.
+ * @returns a camera of the same shape `setCamera` accepts.
+ */
+function blendCamera(from, to, t) {
+  const panFrom = Array.isArray(from.pan) ? from.pan : [0, 0, 0];
+  const panTo = Array.isArray(to.pan) ? to.pan : [0, 0, 0];
+  return {
+    yaw: lerpAngle(from.yaw, to.yaw, t),
+    pitch: lerp(from.pitch, to.pitch, t),
+    zoom: lerp(from.zoom, to.zoom, t),
+    pan: [0, 1, 2].map((index) => lerp(panFrom[index], panTo[index], t)),
+  };
+}
+
+/**
+ * The camera a tour shows at a given moment.
+ *
+ * A tour of one view has no segment to interpolate, so it holds that view; the
+ * caller does not have to special-case it.
+ *
+ * @param views - the recorded cameras, in order.
+ * @param duration - the whole tour, in milliseconds.
+ * @param elapsed - how far in, in milliseconds.
+ * @returns `{ camera, index }` where `index` is the view being approached.
+ */
+function sampleTour(views, duration, elapsed) {
+  if (!Array.isArray(views) || views.length === 0) return null;
+  if (views.length === 1) return { camera: views[0], index: 0 };
+  const span = Math.max(1, duration);
+  const progress = easeTour(elapsed / span);
+  const segments = views.length - 1;
+  const position = progress * segments;
+  const index = Math.min(segments - 1, Math.floor(position));
+  const local = Math.min(1, Math.max(0, position - index));
+  return {
+    camera: blendCamera(views[index], views[index + 1], local),
+    index: local >= 0.5 ? index + 1 : index,
+  };
+}
+
+/**
+ * Whether a value is a camera this module can fly to.
+ *
+ * Deliberately loose about the optional parts: a view recorded before zoom and pan
+ * existed still has an angle, and refusing it would throw away a tour that works.
+ */
+function isCamera(value) {
+  return typeof value === 'object' && value !== null
+    && Number.isFinite(value.yaw) && Number.isFinite(value.pitch);
+}
+
+/**
+ * The motion controls: one popover holding the turntable and the tour.
+ *
+ * Built once per panel and reused, like the colour window, and for the same
+ * reason: it is a handful of nodes whose values are rewritten on open, and
+ * rebuilding it would drop the pointer capture of a drag in progress.
+ */
+class MotionControl {
+  /**
+   * @param t - the panel's translator.
+   * @param document - the document to create nodes in.
+   * @param host - the positioned element to mount into.
+   * @param callbacks - `onSpin`, `onTour`, `onStop`, `onRecord`, `onForget`,
+   *   `onDuration`, `onCapture`. Each is a plain notification of intent; this
+   *   class owns no camera and no clock.
+   */
+  constructor({ t, document, host, callbacks }) {
+    this.t = t;
+    this.document = document;
+    this.callbacks = callbacks;
+    this.open = false;
+    /** The views in the tour, as the panel currently has them. */
+    this.views = [];
+    this.build();
+    append(host, this.node);
+  }
+
+  /** Whether the popover is showing. */
+  get isOpen() {
+    return this.open;
+  }
+
+  /* ------------------------------------------------------------------ DOM -- */
+
+  build() {
+    // The turntable: one switch and a speed, since a turntable needs nothing else.
+    this.spinToggle = el('button', {
+      type: 'button',
+      class: 'm3d-motion-toggle',
+      'aria-pressed': 'false',
+      onClick: () => this.callbacks.onSpin?.(),
+    }, [
+      el('span', { class: 'm3d-motion-toggle-label' }, this.t('motion.spin')),
+      el('span', { class: 'm3d-motion-toggle-state' }, this.t('motion.off')),
+    ]);
+
+    this.spinSpeed = el('input', {
+      type: 'range',
+      min: '0.15',
+      max: '1.2',
+      step: '0.05',
+      class: 'm3d-motion-speed',
+      'aria-label': this.t('motion.speed'),
+      onInput: (event) => this.callbacks.onSpeed?.(Number(event.target.value)),
+    });
+    this.spinSpeed.value = '0.4';
+
+    this.spinSpeedValue = el('span', { class: 'm3d-motion-value' }, '0.4');
+
+    // The tour: a list of recorded views, in order.
+    this.viewList = el('div', { class: 'm3d-motion-views', 'data-motion-views': true });
+    this.viewCount = el('span', { class: 'm3d-motion-count' });
+
+    this.recordButton = el('button', {
+      type: 'button',
+      class: 'm3d-motion-button',
+      title: this.t('motion.record'),
+      onClick: () => this.callbacks.onRecord?.(),
+    }, [icon('plus', 13), el('span', null, this.t('motion.record'))]);
+
+    this.playButton = el('button', {
+      type: 'button',
+      class: 'm3d-motion-button is-primary',
+      title: this.t('motion.playTour'),
+      onClick: () => this.callbacks.onTour?.(),
+    }, [icon('play', 13), el('span', null, this.t('motion.playTour'))]);
+
+    this.stopButton = el('button', {
+      type: 'button',
+      class: 'm3d-motion-button',
+      title: this.t('motion.stop'),
+      onClick: () => this.callbacks.onStop?.(),
+    }, [icon('pause', 13), el('span', null, this.t('motion.stop'))]);
+
+    this.durationField = el('input', {
+      type: 'text',
+      class: 'm3d-motion-number',
+      inputmode: 'numeric',
+      spellcheck: 'false',
+      autocomplete: 'off',
+      'aria-label': this.t('motion.duration'),
+      onInput: (event) => {
+        const text = event.target.value.trim();
+        if (!/^\d{1,5}$/.test(text)) return;
+        this.callbacks.onDuration?.(Number(text));
+      },
+    });
+    this.durationField.value = '4000';
+
+    this.title = el('span', { class: 'm3d-motion-title' }, this.t('motion.title'));
+
+    this.window = el('div', {
+      class: 'm3d-motion-window',
+      role: 'dialog',
+      'aria-label': this.t('motion.title'),
+      tabindex: '-1',
+      onKeyDown: (event) => { if (event.key === 'Escape') { event.preventDefault(); this.hide(); } },
+    }, [
+      el('div', { class: 'm3d-motion-head' }, [
+        this.title,
+        el('button', {
+          type: 'button',
+          class: 'm3d-motion-icon',
+          title: this.t('picker.cancel'),
+          'aria-label': this.t('picker.cancel'),
+          onClick: () => this.hide(),
+        }, icon('close', 12)),
+      ]),
+      el('div', { class: 'm3d-motion-section' }, [
+        this.spinToggle,
+        el('div', { class: 'm3d-motion-row' }, [
+          el('span', { class: 'm3d-motion-label' }, this.t('motion.speed')),
+          this.spinSpeed,
+          this.spinSpeedValue,
+        ]),
+      ]),
+      el('div', { class: 'm3d-motion-section' }, [
+        el('div', { class: 'm3d-motion-row is-head' }, [
+          el('span', { class: 'm3d-motion-label' }, this.t('motion.views')),
+          this.viewCount,
+        ]),
+        this.viewList,
+        el('div', { class: 'm3d-motion-row' }, [this.recordButton]),
+        el('div', { class: 'm3d-motion-row' }, [
+          el('span', { class: 'm3d-motion-label' }, this.t('motion.duration')),
+          this.durationField,
+          el('span', { class: 'm3d-motion-unit' }, this.t('motion.ms')),
+        ]),
+        el('div', { class: 'm3d-motion-row' }, [this.playButton, this.stopButton]),
+      ]),
+    ]);
+
+    this.node = el('div', {
+      class: 'm3d-motion',
+      'data-model3d-motion': true,
+      hidden: true,
+    }, [this.window]);
+  }
+
+  /* ----------------------------------------------------------------- open -- */
+
+  /**
+   * Open the popover.
+   *
+   * @param anchor - the button that opened it, so it appears beside that control.
+   * @param state - `{ spinning, speed, views, duration, playing }`.
+   */
+  show(anchor, state) {
+    this.anchor = anchor;
+    this.update(state);
+    this.node.hidden = false;
+    this.open = true;
+    this.node.style.left = '8px';
+    this.node.style.top = '8px';
+    // Placed after it is visible: a hidden element measures zero.
+    this.place();
+    this.window.focus?.();
+  }
+
+  /** Position the popover against its button. */
+  place() {
+    placePopover(this.node, this.anchor);
+  }
+
+  /** Close the popover. */
+  hide() {
+    if (!this.open) return;
+    this.open = false;
+    this.node.hidden = true;
+  }
+
+  /* ---------------------------------------------------------------- state -- */
+
+  /**
+   * Rewrite the window from the panel's state.
+   *
+   * Called on open and after every change the panel makes, so the two never
+   * disagree about whether the turntable is running or how many views a tour has.
+   */
+  update(state) {
+    const { spinning = false, speed = 0.4, views = [], duration = 4000, playing = false } = state;
+    this.views = views;
+    this.spinToggle.classList.toggle('is-on', spinning);
+    this.spinToggle.setAttribute('aria-pressed', String(spinning));
+    this.spinToggle.querySelector('.m3d-motion-toggle-state').textContent = spinning
+      ? this.t('motion.on')
+      : this.t('motion.off');
+    if (this.document.activeElement !== this.spinSpeed) this.spinSpeed.value = String(speed);
+    this.spinSpeedValue.textContent = Number(speed).toFixed(2);
+    if (this.document.activeElement !== this.durationField) {
+      this.durationField.value = String(Math.round(duration));
+    }
+    this.playButton.disabled = views.length < 1;
+    this.stopButton.disabled = !playing;
+    this.playButton.classList.toggle('is-playing', playing);
+    this.renderViews();
+  }
+
+  /** Rebuild the view list. */
+  renderViews() {
+    clear(this.viewList);
+    const count = this.views.length;
+    this.viewCount.textContent = this.t('motion.viewCount', { count: String(count) });
+    this.viewList.hidden = count === 0;
+    if (count === 0) {
+      this.viewList.append(el('p', { class: 'm3d-motion-empty' }, this.t('motion.noViews')));
+      this.viewList.hidden = false;
+      return;
+    }
+    this.views.forEach((view, index) => {
+      const row = el('div', { class: 'm3d-motion-view' }, [
+        el('span', { class: 'm3d-motion-view-index' }, String(index + 1)),
+        el('button', {
+          type: 'button',
+          class: 'm3d-motion-view-go',
+          title: this.t('motion.goTo'),
+          onClick: () => this.callbacks.onGoTo?.(index),
+        }, this.describe(view)),
+        el('button', {
+          type: 'button',
+          class: 'm3d-motion-icon',
+          title: this.t('motion.forget'),
+          'aria-label': this.t('motion.forget'),
+          onClick: () => this.callbacks.onForget?.(index),
+        }, icon('trash', 12)),
+      ]);
+      this.viewList.append(row);
+    });
+  }
+
+  /** One view as a short readable line: its angle, distance and shift. */
+  describe(view) {
+    const degrees = (radians) => `${Math.round((radians * 180) / Math.PI)}°`;
+    const zoom = Number.isFinite(view.zoom) ? `${view.zoom.toFixed(2)}×` : '1.00×';
+    return `${degrees(view.yaw)} / ${degrees(view.pitch)} · ${zoom}`;
   }
 }
 
@@ -9671,6 +10421,7 @@ function createTracer(canvas) {
 
 
 
+
 /**
  * Format one dimension triple for the stats line.
  *
@@ -9752,6 +10503,14 @@ class ViewerPanel {
       oneLayer: false,
       /** Whether the print is playing back, and where it has got to. */
       playing: false,
+      /** The turntable: whether it is turning, and how fast, in radians/ms. */
+      spinning: false,
+      spinSpeed: 0.4,
+      /** Recorded views, in order, and how long a tour through them lasts. */
+      tour: [],
+      tourDuration: DEFAULT_TOUR_DURATION,
+      /** Whether a tour is flying, and where it started. */
+      touring: false,
       /** Where the cut was when the one-layer switch was last on. */
       lastCut: 0,
       bed: { available: false, visible: false },
@@ -9981,6 +10740,12 @@ class ViewerPanel {
       paletteOverrides: Object.keys(state.paletteOverrides).length === 0
         ? undefined
         : state.paletteOverrides,
+      // The tour belongs to the file: which corners are worth showing is a
+      // judgement about this print, and angles recorded for one model mean
+      // nothing on the next.
+      tour: state.tour.length === 0 ? undefined : state.tour,
+      tourDuration: state.tourDuration,
+      spinSpeed: state.spinSpeed,
     };
   }
 
@@ -10056,6 +10821,9 @@ class ViewerPanel {
         this.state.bed = this.viewer.bedInfo();
       }
     }
+    if (Array.isArray(saved.tour)) this.state.tour = saved.tour;
+    if (saved.tourDuration !== undefined) this.state.tourDuration = saved.tourDuration;
+    if (saved.spinSpeed !== undefined) this.state.spinSpeed = saved.spinSpeed;
     if (saved.camera !== undefined) {
       // The whole camera, not just the angle: a file that was zoomed into a detail
       // should reopen on that detail. `setCamera` takes whatever the blob has, so
@@ -10135,6 +10903,16 @@ class ViewerPanel {
       onClick: () => this.togglePlay(),
     });
     this.playButton.hidden = true;
+    // Camera motion: a turntable, and a tour through views the user records. It
+    // needs a viewer but not a sliced file -- looking round a model is as useful
+    // as looking round a plate -- so it is offered whenever something is drawn.
+    this.motionButton = this.button({
+      icon: 'motion',
+      label: t('motion.title'),
+      toggle: true,
+      onClick: () => this.toggleMotion(),
+    });
+    this.motionButton.hidden = true;
     // Tracing replaces the interactive view rather than sitting beside it: the two
     // are the same scene, and showing both would halve the space for each. The
     // button toggles, and the overlay can be dismissed with it.
@@ -10169,6 +10947,7 @@ class ViewerPanel {
       this.bedButton,
       this.snapshotButton,
       this.playButton,
+      this.motionButton,
       this.traceButton,
       this.saveTracedButton,
       this.backgroundPicker.node,
@@ -10382,6 +11161,15 @@ class ViewerPanel {
     // broken here as well: a step that survives this would call into a viewer
     // whose context has gone.
     this.stopPlay(true);
+    // The motion loops are pending-callback chains too, and both write to the
+    // camera: a step that outlived the viewer would call into a disposed context.
+    this.state.spinning = false;
+    this.cancelFrame(this.spinHandle);
+    this.spinHandle = undefined;
+    this.cancelFrame(this.tourHandle);
+    this.tourHandle = undefined;
+    this.state.touring = false;
+    this.motion?.hide();
     this.bvh = null;
     if (this.tracer !== null && this.tracer !== undefined) {
       this.tracer.dispose();
@@ -10996,7 +11784,7 @@ class ViewerPanel {
    * is the mistake that once made the trace loop count to 109 against a budget of
    * 96: the abandoned one started a second chain beside the first.
    */
-  frame(handle, run) {
+  frame(handle, run, slot = 'previewHandle') {
     if (handle !== undefined) return handle;
     const view = this.document.defaultView;
     if (view === undefined || view === null) return undefined;
@@ -11004,10 +11792,16 @@ class ViewerPanel {
     const once = () => {
       if (done) return;
       done = true;
-      if (this.previewHandle !== undefined) {
-        view.cancelAnimationFrame?.(this.previewHandle.frame);
-        view.clearTimeout?.(this.previewHandle.timer);
-        this.previewHandle = undefined;
+      // The slot to clear is named by the caller, not assumed: three loops use
+      // this helper now, and cancelling `previewHandle` from the turntable's
+      // callback would leave the turntable's own timer to fire a second chain
+      // beside the first -- the exact shape of the trace-loop bug that counted to
+      // 109 against a budget of 96.
+      const held = this[slot];
+      if (held !== undefined) {
+        view.cancelAnimationFrame?.(held.frame);
+        view.clearTimeout?.(held.timer);
+        this[slot] = undefined;
       }
       run();
     };
@@ -11080,6 +11874,237 @@ class ViewerPanel {
     this.viewer?.setPlainLighting(this.state.plainLighting);
     this.syncToolbar();
     this.queueSave();
+  }
+
+  /* --------------------------------------------------------------- motion -- */
+
+  /**
+   * Open or close the motion popover.
+   *
+   * The popover holds two things that both move the camera, so opening it does not
+   * start anything: a control that begins moving the view the moment it is opened
+   * is a control you cannot read.
+   */
+  toggleMotion() {
+    const { state } = this;
+    if (this.motion?.isOpen) {
+      this.motion.hide();
+      this.syncToolbar();
+      return;
+    }
+    this.motion ??= new MotionControl({
+      t: this.t,
+      document: this.document,
+      host: this.root,
+      callbacks: {
+        onSpin: () => this.toggleSpin(),
+        onSpeed: (value) => this.setSpinSpeed(value),
+        onTour: () => this.startTour(),
+        onStop: () => this.stopMotion(),
+        onRecord: () => this.recordView(),
+        onForget: (index) => this.forgetView(index),
+        onGoTo: (index) => this.goToView(index),
+        onDuration: (value) => this.setTourDuration(value),
+      },
+    });
+    this.motion.show(this.motionButton, this.motionState());
+    this.syncToolbar();
+  }
+
+  /** The motion popover's view of the state. */
+  motionState() {
+    const { state } = this;
+    return {
+      spinning: state.spinning,
+      speed: state.spinSpeed,
+      views: state.tour,
+      duration: state.tourDuration,
+      playing: state.touring,
+    };
+  }
+
+  /** Rewrite the popover, if it is open. */
+  syncMotion() {
+    if (this.motion?.isOpen) this.motion.update(this.motionState());
+  }
+
+  /**
+   * Start or stop the turntable.
+   *
+   * The turntable turns the *camera*, not the model: rotating the mesh would carry
+   * the build plate and the key light with it, and a preview whose light swings
+   * around is describing a material it is not showing.
+   */
+  toggleSpin() {
+    const { state, viewer } = this;
+    if (viewer === null) return;
+    state.spinning = !state.spinning;
+    if (state.spinning) {
+      // A tour and a turntable are two hands on the same wheel; one at a time.
+      if (state.touring) this.stopTour();
+      this.spinLast = this.now();
+      this.stepSpin();
+    } else {
+      this.cancelFrame(this.spinHandle);
+      this.spinHandle = undefined;
+    }
+    this.syncMotion();
+    this.syncToolbar();
+  }
+
+  /** How fast the turntable turns, in radians per millisecond. */
+  setSpinSpeed(speed) {
+    const value = Math.max(0.05, Math.min(3, Number(speed) || 0.4));
+    this.state.spinSpeed = value;
+    // Restart the clock reference so a speed change does not apply retroactively
+    // to the time already elapsed at the old one.
+    this.spinLast = this.now();
+    this.syncMotion();
+    this.queueSave();
+  }
+
+  /**
+   * One step of the turntable.
+   *
+   * The angle advances by elapsed time rather than by a fixed increment per frame:
+   * a fixed step would spin at whatever rate the machine happens to render, which
+   * on a large plate is visibly slower than on a small one.
+   */
+  stepSpin() {
+    if (!this.state.spinning) return;
+    const { viewer, state } = this;
+    if (viewer === null) { this.state.spinning = false; return; }
+    const now = this.now();
+    const elapsed = Math.min(100, Math.max(0, now - (this.spinLast ?? now)));
+    this.spinLast = now;
+    const camera = viewer.orientation();
+    // Yaw only. A turntable that wandered in pitch would end up looking at the
+    // plate edge-on, which is not what "turn it round" means.
+    viewer.setCamera({ ...camera, yaw: camera.yaw + state.spinSpeed * elapsed / 1000 });
+    this.scheduleSpinStep();
+  }
+
+  /** Ask for the next turntable step. */
+  scheduleSpinStep() {
+    if (!this.state.spinning) return;
+    this.spinHandle = this.frame(this.spinHandle, () => {
+      this.spinHandle = undefined;
+      this.stepSpin();
+    }, 'spinHandle');
+  }
+
+  /* ------------------------------------------------------------ the tour -- */
+
+  /** Record the camera as it stands as the next view. */
+  recordView() {
+    const { viewer, state } = this;
+    if (viewer === null) return;
+    if (state.tour.length >= MAX_TOUR_VIEWS) {
+      this.showStatus(this.t('motion.tooMany', { max: String(MAX_TOUR_VIEWS) }));
+      return;
+    }
+    state.tour = [...state.tour, viewer.orientation()];
+    this.syncMotion();
+    this.queueSave();
+  }
+
+  /** Forget one recorded view. */
+  forgetView(index) {
+    const { state } = this;
+    if (!Number.isInteger(index) || index < 0 || index >= state.tour.length) return;
+    state.tour = state.tour.filter((_, at) => at !== index);
+    this.syncMotion();
+    this.queueSave();
+  }
+
+  /** Jump to one recorded view, without flying there. */
+  goToView(index) {
+    const { viewer, state } = this;
+    if (viewer === null) return;
+    const view = state.tour[index];
+    if (!isCamera(view)) return;
+    this.stopMotion();
+    viewer.setCamera(view);
+  }
+
+  /** Set how long a tour takes. */
+  setTourDuration(value) {
+    const ms = Math.max(800, Math.min(60000, Math.round(Number(value) || 4000)));
+    this.state.tourDuration = ms;
+    this.syncMotion();
+    this.queueSave();
+  }
+
+  /**
+   * Fly through the recorded views.
+   *
+   * The camera is set from the tour's own arithmetic each step rather than advanced
+   * incrementally, so a slow frame skips forward instead of slowing the flight
+   * down: an animation of a fixed length should take that long.
+   */
+  startTour() {
+    const { state } = this;
+    if (state.tour.length === 0) return;
+    if (state.spinning) this.toggleSpin();
+    this.stopTour();
+    state.touring = true;
+    this.tourStarted = this.now();
+    this.stepTour();
+    this.syncMotion();
+    this.syncToolbar();
+  }
+
+  /** One step of the tour. */
+  stepTour() {
+    if (!this.state.touring) return;
+    const { viewer, state } = this;
+    if (viewer === null) { state.touring = false; return; }
+    const elapsed = this.now() - (this.tourStarted ?? this.now());
+    const sample = sampleTour(state.tour, state.tourDuration, elapsed);
+    if (sample === null) { this.stopTour(); return; }
+    viewer.setCamera(sample.camera);
+    if (elapsed >= state.tourDuration) {
+      // The last view is left on screen, the same way a finished print is.
+      this.stopTour(true);
+      return;
+    }
+    this.tourHandle = this.frame(this.tourHandle, () => {
+      this.tourHandle = undefined;
+      this.stepTour();
+    }, 'tourHandle');
+  }
+
+  /**
+   * Stop a tour.
+   *
+   * @param finished - `true` when the tour reached its end, so the last view stays.
+   */
+  stopTour(finished = false) {
+    this.cancelFrame(this.tourHandle);
+    this.tourHandle = undefined;
+    const wasTouring = this.state.touring;
+    this.state.touring = false;
+    if (wasTouring) {
+      this.syncMotion();
+      this.syncToolbar();
+    }
+    void finished;
+  }
+
+  /** Stop whichever motion is running. */
+  stopMotion() {
+    if (this.state.touring) this.stopTour();
+    if (this.state.spinning) this.toggleSpin();
+    this.syncMotion();
+    this.syncToolbar();
+  }
+
+  /** Cancel a scheduled frame from either motion loop. */
+  cancelFrame(handle) {
+    if (handle === undefined) return;
+    const view = this.document.defaultView;
+    view?.cancelAnimationFrame?.(handle.frame);
+    view?.clearTimeout?.(handle.timer);
   }
 
   /* ------------------------------------------------------------- playback -- */
@@ -11379,6 +12404,15 @@ class ViewerPanel {
     // while the first is still under the pointer is a control that jumps.
     const glyph = icon(state.playing ? 'pause' : 'play', 16);
     if (glyph !== null) this.playButton.replaceChildren(glyph);
+
+    // Motion needs a drawn scene, not a sliced one: a turntable round a model is
+    // as useful as round a plate. The button reads as pressed while anything is
+    // moving, so the way to stop is where it started.
+    const moving = state.spinning || state.touring;
+    this.motionButton.hidden = !ready || state.tracing === true;
+    this.motionButton.disabled = !ready;
+    this.motionButton.classList.toggle('is-pressed', moving || this.motion?.isOpen === true);
+    this.motionButton.setAttribute('aria-pressed', String(moving));
     this.traceButton.disabled = !ready;
     this.traceButton.classList.toggle('is-pressed', state.tracing);
     this.traceButton.setAttribute('aria-pressed', String(state.tracing));
@@ -12443,4 +13477,4 @@ function setLocales(locales) {
 setLocales(LOCALES);
 defineModelViewer();
 
-export { ViewerPanel, formatSize, mount, defineModelViewer, parseModel, parseStl, parse3mf, parseGcode, createViewer, createCube, createLoader, isModelName, MODEL_EXTENSIONS, injectStyles, createTranslator, pickDictionary, BACKGROUNDS, keyOf, parseSnapshot, serialise, validateSnapshot, createLocalStore, createMemoryStore, debounce, STORE_VERSION, buildBvh, createTracer, renderStillToDataUrl, createStillRender, ModelViewerElement, setLocales };
+export { ViewerPanel, formatSize, mount, defineModelViewer, parseModel, parseStl, parse3mf, parseGcode, createViewer, createCube, createLoader, isModelName, MODEL_EXTENSIONS, injectStyles, createTranslator, pickDictionary, BACKGROUNDS, keyOf, parseSnapshot, serialise, validateSnapshot, createLocalStore, createMemoryStore, debounce, STORE_VERSION, buildBvh, createTracer, renderStillToDataUrl, createStillRender, ModelViewerElement, setLocales, MAX_TOUR_VIEWS, DEFAULT_TOUR_DURATION, sampleTour, blendCamera, lerpAngle, easeTour };

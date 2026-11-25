@@ -67,7 +67,23 @@
     "picker.cancel": "Cancel",
     "controls.play": "Play the print",
     "controls.playStop": "Stop the playback",
-    "status.printingLayer": "Printing layer {layer} of {total}"
+    "status.printingLayer": "Printing layer {layer} of {total}",
+    "motion.title": "Motion",
+    "motion.spin": "Turntable",
+    "motion.on": "on",
+    "motion.off": "off",
+    "motion.speed": "Speed",
+    "motion.views": "Views",
+    "motion.viewCount": "{count} recorded",
+    "motion.noViews": "Record a view to start a tour",
+    "motion.record": "Add view",
+    "motion.playTour": "Play tour",
+    "motion.stop": "Stop",
+    "motion.duration": "Duration",
+    "motion.ms": "ms",
+    "motion.goTo": "Go to this view",
+    "motion.forget": "Remove this view",
+    "motion.tooMany": "A tour holds at most {max} views"
   },
   "ru": {
     "meta": {
@@ -137,6 +153,22 @@
     "picker.cancel": "Отмена",
     "controls.play": "Проиграть печать",
     "controls.playStop": "Остановить проигрывание",
-    "status.printingLayer": "Печать слоя {layer} из {total}"
+    "status.printingLayer": "Печать слоя {layer} из {total}",
+    "motion.title": "Движение",
+    "motion.spin": "Вращение",
+    "motion.on": "вкл",
+    "motion.off": "выкл",
+    "motion.speed": "Скорость",
+    "motion.views": "Ракурсы",
+    "motion.viewCount": "записано: {count}",
+    "motion.noViews": "Запишите ракурс, чтобы начать облёт",
+    "motion.record": "Добавить ракурс",
+    "motion.playTour": "Облететь",
+    "motion.stop": "Остановить",
+    "motion.duration": "Длительность",
+    "motion.ms": "мс",
+    "motion.goTo": "Перейти к этому ракурсу",
+    "motion.forget": "Удалить ракурс",
+    "motion.tooMany": "В облёте не больше {max} ракурсов"
   }
 }

@@ -66,5 +66,21 @@
   "picker.cancel": "Cancel",
   "controls.play": "Play the print",
   "controls.playStop": "Stop the playback",
-  "status.printingLayer": "Printing layer {layer} of {total}"
+  "status.printingLayer": "Printing layer {layer} of {total}",
+  "motion.title": "Motion",
+  "motion.spin": "Turntable",
+  "motion.on": "on",
+  "motion.off": "off",
+  "motion.speed": "Speed",
+  "motion.views": "Views",
+  "motion.viewCount": "{count} recorded",
+  "motion.noViews": "Record a view to start a tour",
+  "motion.record": "Add view",
+  "motion.playTour": "Play tour",
+  "motion.stop": "Stop",
+  "motion.duration": "Duration",
+  "motion.ms": "ms",
+  "motion.goTo": "Go to this view",
+  "motion.forget": "Remove this view",
+  "motion.tooMany": "A tour holds at most {max} views"
 }

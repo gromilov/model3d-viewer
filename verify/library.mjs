@@ -359,6 +359,27 @@ const CHECKS = [
     pixels: { minColours: 16, minNonBackground: 0.02 },
   },
   {
+    // Two kinds of camera motion: a turntable that needs no setup, and a tour
+    // through views the user records by hand.
+    //
+    // The arithmetic is asserted separately from the animation, because a smooth
+    // flight through the wrong angle looks perfectly fine. In particular the angle
+    // lerp is checked on the wrap: 350° to 10° is a 20° turn, and taking the long
+    // way is the classic way an orbit animation looks broken at one angle. That
+    // check was confirmed by breaking `lerpAngle` to a naive lerp, which reports
+    // a midpoint of 180°.
+    //
+    // So was the turntable: the pitch must not move, and turning it into a pitch
+    // drift fails the check that says a turntable turns rather than wanders.
+    name: 'embed: the turntable and the recorded tour move the camera',
+    page: 'motion-check.html',
+    size: [560, 760],
+    needs: 'sliced.3mf',
+    expect: /MOTIONCHECK ok/,
+    reject: /ERR|REJ|FAIL/,
+    pixels: { minColours: 8, minNonBackground: 0.01 },
+  },
+  {
     // The play button walks the plate in the file's own order: the first layer
     // stroke by stroke, every layer above it a layer at a time.
     //

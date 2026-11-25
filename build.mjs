@@ -58,6 +58,7 @@ const MODULES = [
   'loader',
   'persist',
   'picker',
+  'motion',
   'bvh',
   'tracer',
   'panel',

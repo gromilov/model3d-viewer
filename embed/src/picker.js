@@ -26,7 +26,7 @@
  * what to put back rather than the window guessing at "the file's own colour".
  */
 
-import { append, clear, el, icon } from './dom.js';
+import { append, clear, el, icon, placePopover } from './dom.js';
 
 /** Clamp a number into 0..1, treating a non-number as zero. */
 function unit(value) {
@@ -543,32 +543,7 @@ export class ColorPickerControl {
    * leaves the sidebar is not a popover, it is a clipped window.
    */
   place(anchor) {
-    const host = this.node.parentElement;
-    if (host === null) return;
-    const hostBox = host.getBoundingClientRect();
-    const box = this.node.getBoundingClientRect();
-    const gap = 6;
-    const margin = 8;
-
-    let left = margin;
-    let top = margin;
-    if (anchor !== undefined && anchor !== null) {
-      const a = anchor.getBoundingClientRect();
-      left = a.left - hostBox.left;
-      // The swatch is small; centre the popover on it, then pull it back inside.
-      left = Math.min(left, hostBox.width - box.width - margin);
-      left = Math.max(margin, left);
-      const below = a.bottom - hostBox.top + gap;
-      const above = a.top - hostBox.top - box.height - gap;
-      // Below if it fits, above if that is where the room is, and pinned inside
-      // the panel when neither side fits -- which is the short-sidebar case.
-      if (below + box.height <= hostBox.height - margin) top = below;
-      else if (above >= margin) top = above;
-      else top = Math.max(margin, Math.min(below, hostBox.height - box.height - margin));
-    }
-    this.node.style.left = `${Math.round(left)}px`;
-    this.node.style.top = `${Math.round(top)}px`;
-    this.node.style.maxHeight = `${Math.round(hostBox.height - margin * 2)}px`;
+    placePopover(this.node, anchor);
   }
 
   /** Fill the preset row from the file's palette. */

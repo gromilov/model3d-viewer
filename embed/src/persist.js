@@ -32,8 +32,27 @@
  */
 export const STORE_VERSION = 1;
 
+/**
+ * How many recorded views a tour may keep.
+ *
+ * A tour is a handful of angles someone picked by hand; past a dozen it is a
+ * slideshow nobody watches, and the list would push the popover's own controls
+ * off a short sidebar. The cap is enforced on the way in as well as on the way
+ * out, so a hand-edited blob cannot make the panel slow to open.
+ */
+export const MAX_TOUR_VIEWS = 12;
+
 /** The prefix on every key, so a host page's own storage cannot collide with it. */
 export const KEY_PREFIX = 'model3d:file:';
+
+/**
+ * How long a tour takes, in milliseconds, when nothing is stored.
+ *
+ * Four seconds for however many views: a three-view turntable is a slow turn, a
+ * ten-view one is brisk. Scaled by the count instead would make a long tour
+ * unwatchable, and the panel lets the number be typed anyway.
+ */
+export const DEFAULT_TOUR_DURATION = 4000;
 
 /**
  * A store that keeps nothing.
@@ -257,6 +276,33 @@ export function validateSnapshot(raw) {
   }
 
   if (typeof raw.lightLevel === 'number') out.lightLevel = clampNumber(raw.lightLevel, 0.2, 2, 1);
+
+  // The tour: a list of recorded cameras and how long to fly through them. Stored
+  // per file because it is a judgement about *this* print -- which corners are
+  // worth showing is different for a carabiner and a phone stand -- and because a
+  // tour that survived a change of file would fly to angles that mean nothing on
+  // the next one.
+  if (Array.isArray(raw.tour)) {
+    const tour = [];
+    for (const entry of raw.tour.slice(0, MAX_TOUR_VIEWS)) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      if (!Number.isFinite(entry.yaw) || !Number.isFinite(entry.pitch)) continue;
+      const view = { yaw: entry.yaw, pitch: entry.pitch };
+      if (Number.isFinite(entry.zoom) && entry.zoom > 0) view.zoom = entry.zoom;
+      if (Array.isArray(entry.pan) && entry.pan.length === 3
+        && entry.pan.every((value) => Number.isFinite(value))) {
+        view.pan = [entry.pan[0], entry.pan[1], entry.pan[2]];
+      }
+      tour.push(view);
+    }
+    if (tour.length > 0) out.tour = tour;
+  }
+  if (typeof raw.tourDuration === 'number') {
+    out.tourDuration = clampNumber(raw.tourDuration, 800, 60000, 4000);
+  }
+  if (typeof raw.spinSpeed === 'number') {
+    out.spinSpeed = clampNumber(raw.spinSpeed, 0.05, 3, 0.4);
+  }
 
   if (typeof raw.paletteOverrides === 'object' && raw.paletteOverrides !== null) {
     const overrides = {};

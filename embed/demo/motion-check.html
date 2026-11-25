@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>motion</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0a0b0c; color: #d6d8db; font: 12px/1.5 ui-monospace, Menlo, monospace; }
+  #box { width: 520px; height: 460px; margin: 8px; }
+  #log { margin: 8px; white-space: pre; color: #8a949c; }
+</style>
+</head>
+<body>
+<div id="box"></div>
+<div id="log">start</div>
+<script type="module">
+  import {
+    mount, easeTour, lerpAngle, blendCamera, sampleTour,
+  } from '../dist/model3d-viewer.mjs';
+
+  // Two features, one page. The turntable has to turn the *camera* without
+  // touching the pitch; the tour has to fly between recorded views. Both are
+  // asserted on the camera the engine reports, and the arithmetic is asserted
+  // separately, because a smooth animation of the wrong angle looks fine.
+
+  const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+  window.addEventListener('unhandledrejection', (e) => {
+    document.title = 'REJ ' + (e.reason?.message ?? e.reason);
+  });
+
+  const failures = [];
+  const check = (ok, what) => { log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) failures.push(what); };
+  const near = (a, b, tolerance = 1e-6) => Math.abs(a - b) <= tolerance;
+
+  // --- the arithmetic first, with no browser in the way ---------------------
+  check(near(easeTour(0), 0) && near(easeTour(1), 1), 'the easing starts at 0 and ends at 1');
+  check(near(easeTour(0.5), 0.5), 'and passes through the middle at the middle');
+  // Smoothstep is symmetric: f(0.25) === 1 - f(0.75).
+  check(near(easeTour(0.25), 1 - easeTour(0.75), 1e-9), 'the easing is symmetric');
+
+  // The short way round is the whole point of an angle lerp.
+  const wrapped = lerpAngle((350 * Math.PI) / 180, (10 * Math.PI) / 180, 0.5);
+  const wrappedDegrees = (wrapped * 180) / Math.PI;
+  check(Math.abs(wrappedDegrees) < 5 || Math.abs(Math.abs(wrappedDegrees) - 360) < 5,
+    '350° to 10° goes forward through 0, not backward through 180 (midpoint '
+      + wrappedDegrees.toFixed(1) + '°)');
+  check(near(lerpAngle(0, Math.PI / 2, 0.5), Math.PI / 4, 1e-9), 'a plain quarter turn interpolates plainly');
+
+  // Blending a camera blends every part of it.
+  const blended = blendCamera(
+    { yaw: 0, pitch: 0, zoom: 1, pan: [0, 0, 0] },
+    { yaw: 2, pitch: 1, zoom: 3, pan: [2, 4, 6] },
+    0.5,
+  );
+  check(near(blended.yaw, 1) && near(blended.pitch, 0.5), 'a blend moves the angle');
+  check(near(blended.zoom, 2), 'the distance');
+  check(blended.pan.every((v, i) => near(v, [1, 2, 3][i])), 'and the shift');
+
+  // A three-view tour visits each recorded view as it passes it, and only the
+  // views: a sample halfway through a segment must be between two of them, never
+  // outside the range the tour implies.
+  const views = [
+    { yaw: 0, pitch: 0, zoom: 1, pan: [0, 0, 0] },
+    { yaw: 1, pitch: 0.5, zoom: 2, pan: [0, 0, 0] },
+    { yaw: 2, pitch: 0, zoom: 1, pan: [0, 0, 0] },
+  ];
+  check(near(sampleTour(views, 3000, 0).camera.yaw, 0, 1e-9), 'a tour starts at its first view');
+  check(near(sampleTour(views, 3000, 3000).camera.yaw, 2, 1e-9), 'and ends at its last');
+  const middle = sampleTour(views, 3000, 1500).camera;
+  check(middle.yaw > 0.4 && middle.yaw < 1.6, 'the middle of a three-view tour is between the two ends ('
+    + middle.yaw.toFixed(2) + ')');
+  check(near(sampleTour([views[0]], 1000, 500).camera.yaw, 0), 'a one-view tour holds that view');
+  check(sampleTour([], 1000, 0) === null, 'an empty tour samples to nothing rather than throwing');
+
+  // --- the live panel -------------------------------------------------------
+  const panel = mount(document.getElementById('box'), {
+    source: './fixtures/sliced.3mf', language: 'ru', view: 'sliced', remember: false,
+    onStatus: async (status) => {
+      if (status.kind !== 'ready') { if (status.kind === 'failed') document.title = 'FAIL ' + (status.message ?? ''); return; }
+      await sleep(700);
+
+      // A clock the test drives, so the animation is tested rather than timed.
+      let clock = 0;
+      panel.now = () => clock;
+      panel.viewer.setCamera({ yaw: -0.65, pitch: 0.42, zoom: 1 });
+
+      // --- the turntable -------------------------------------------------
+      const before = panel.viewer.orientation();
+      panel.toggleSpin();
+      check(panel.state.spinning === true, 'the turntable starts');
+      clock = 100;
+      panel.stepSpin();
+      await sleep(60);
+      const spun = panel.viewer.orientation();
+      check(Math.abs(spun.yaw - before.yaw) > 1e-4,
+        'the yaw moved (' + before.yaw.toFixed(3) + ' -> ' + spun.yaw.toFixed(3) + ')');
+      check(near(spun.pitch, before.pitch, 1e-9), 'the pitch did not: a turntable turns, it does not wander');
+      check(near(spun.zoom, before.zoom, 1e-9), 'and the distance is untouched');
+
+      // Direction and rate follow the speed control.
+      const slower = spun.yaw;
+      panel.setSpinSpeed(0.2);
+      clock = 200;
+      panel.stepSpin();
+      await sleep(60);
+      const delta = panel.viewer.orientation().yaw - slower;
+      check(delta > 0, 'it keeps turning the same way (' + delta.toFixed(4) + ' rad)');
+      check(Math.abs(delta) < Math.abs(spun.yaw - before.yaw) * 2,
+        'and more slowly at the lower speed');
+
+      panel.toggleSpin();
+      check(panel.state.spinning === false, 'the turntable stops');
+      const stopped = panel.viewer.orientation().yaw;
+      clock = 400;
+      panel.stepSpin();
+      await sleep(60);
+      check(near(panel.viewer.orientation().yaw, stopped, 1e-9), 'and a stopped turntable does not move');
+
+      // --- recording and the tour ----------------------------------------
+      panel.viewer.setCamera({ yaw: 0, pitch: 0.3, zoom: 1 });
+      panel.recordView();
+      panel.viewer.setCamera({ yaw: 1.2, pitch: 0.6, zoom: 0.7 });
+      panel.recordView();
+      panel.viewer.setCamera({ yaw: 2.4, pitch: 0.1, zoom: 1.5 });
+      panel.recordView();
+      check(panel.state.tour.length === 3, 'three views are recorded (' + panel.state.tour.length + ')');
+
+      // A recorded view carries the whole camera, not just the angle: flying to a
+      // view recorded at a different distance must change the distance.
+      check(near(panel.state.tour[1].zoom, 0.7), 'a recorded view keeps its own zoom (' + panel.state.tour[1].zoom + ')');
+
+      // Jumping to a view sets the camera there, without a flight.
+      panel.goToView(2);
+      await sleep(80);
+      const jumped = panel.viewer.orientation();
+      check(near(jumped.yaw, 2.4) && near(jumped.zoom, 1.5), 'going to a view sets the camera to it');
+
+      // --- flying --------------------------------------------------------
+      panel.startTour();
+      check(panel.state.touring === true, 'the tour starts');
+      // The tour captured its start from the clock as it stood, and the clock has
+      // already been moved by the turntable checks above. Anchoring to the tour's
+      // own start is also what the test means: half of *its* duration, not half of
+      // a number the test happens to be holding.
+      const tourStart = panel.tourStarted;
+      clock = tourStart + panel.state.tourDuration / 2;
+      panel.stepTour();
+      await sleep(80);
+      const midway = panel.viewer.orientation();
+      // Halfway through a three-view tour is the *middle view*, not a blend: two
+      // segments, so progress 0.5 lands exactly on the join. That is the honest
+      // reading of the arithmetic, and asserting "strictly between the ends" here
+      // was asserting something the design does not claim. What must hold is that
+      // the camera is at the middle view, which is neither end.
+      check(near(midway.yaw, panel.state.tour[1].yaw, 1e-6),
+        'halfway through a three-view tour the camera is at the middle view (' + midway.yaw.toFixed(2) + ')');
+      const zoomMid = midway.zoom;
+      check(near(zoomMid, panel.state.tour[1].zoom, 1e-6),
+        'at that view\'s own distance (' + zoomMid.toFixed(2) + ')');
+      // And a quarter of the way in has to be *between* views zero and one, which
+      // is where the interpolation actually is.
+      clock = tourStart + panel.state.tourDuration / 4;
+      panel.stepTour();
+      await sleep(60);
+      const quarter = panel.viewer.orientation();
+      check(quarter.yaw > panel.state.tour[0].yaw && quarter.yaw < panel.state.tour[1].yaw,
+        'a quarter of the way in, the camera is between the first and second views ('
+          + quarter.yaw.toFixed(2) + ')');
+      check(quarter.zoom > panel.state.tour[1].zoom && quarter.zoom < panel.state.tour[0].zoom,
+        'and its distance is between theirs (' + quarter.zoom.toFixed(2) + ')');
+
+      clock = tourStart + panel.state.tourDuration;
+      panel.stepTour();
+      await sleep(80);
+      check(panel.state.touring === false, 'the tour stops itself at the end');
+      const ended = panel.viewer.orientation();
+      check(near(ended.yaw, 2.4, 1e-6) && near(ended.zoom, 1.5, 1e-6),
+        'and leaves the last view on screen, which is what the tour was for');
+
+      // --- the button and the popover ------------------------------------
+      panel.toggleMotion();
+      check(panel.motion.isOpen === true, 'the motion window opens');
+      check(document.querySelector('[data-model3d-motion]') !== null, 'and is in the document');
+      check(document.querySelectorAll('[data-motion-views] .m3d-motion-view').length === 3,
+        'it lists the three recorded views');
+      check(document.querySelector('[data-model3d-motion]').hidden === false, 'and is visible');
+      panel.toggleMotion();
+      check(panel.motion.isOpen === false, 'the same button closes it');
+
+      // Forgetting a view, and the cap.
+      panel.forgetView(0);
+      check(panel.state.tour.length === 2, 'a view can be removed (' + panel.state.tour.length + ')');
+      for (let index = 0; index < 20; index += 1) panel.recordView();
+      check(panel.state.tour.length === 12,
+        'a tour is capped at twelve views (' + panel.state.tour.length + ')');
+
+      document.title = failures.length === 0 ? 'MOTIONCHECK ok' : 'FAIL ' + failures.join('; ');
+    },
+  });
+</script>
+</body>
+</html>

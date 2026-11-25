@@ -43,6 +43,7 @@ const MODULES = [
   'loader',
   'persist',
   'picker',
+  'motion',
   'bvh',
   'tracer',
   'panel',
@@ -100,6 +101,12 @@ const EXPORTS = [
   'createStillRender',
   'ModelViewerElement',
   'setLocales',
+  'MAX_TOUR_VIEWS',
+  'DEFAULT_TOUR_DURATION',
+  'sampleTour',
+  'blendCamera',
+  'lerpAngle',
+  'easeTour',
 ];
 
 /** The bundled dictionaries, so a page needs no extra requests. */

@@ -1,0 +1,26 @@
+<!doctype html><html><head><meta charset="utf-8"><title>motionlook</title>
+<style>html,body{margin:0;background:#14100c}#box{width:520px;height:520px}</style></head>
+<body><div id="box"></div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/sliced.3mf', language: 'ru', view: 'sliced', remember: false,
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') { if (s.kind === 'failed') document.title = 'FAIL ' + (s.message ?? ''); return; }
+    await sleep(700);
+    // Three recorded angles, so the list has something in it.
+    panel.viewer.setCamera({ yaw: -0.65, pitch: 0.42 });
+    panel.recordView();
+    panel.viewer.setCamera({ yaw: 0.9, pitch: 0.9, zoom: 0.6 });
+    panel.recordView();
+    panel.viewer.setCamera({ yaw: 2.2, pitch: 0.15, zoom: 1.4 });
+    panel.recordView();
+    panel.viewer.setCamera({ yaw: -0.65, pitch: 0.42, zoom: 1 });
+    panel.toggleMotion();
+    await sleep(300);
+    document.title = 'SHOT';
+  },
+});
+</script></body></html>

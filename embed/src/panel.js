@@ -34,8 +34,11 @@ import { createTracer, createStillRender } from './tracer.js';
 import { createCube } from './cube.js';
 import { injectStyles } from './styles.js';
 import { ColorPickerControl } from './picker.js';
+import { MotionControl, sampleTour, isCamera } from './motion.js';
 import {
   STORE_VERSION,
+  MAX_TOUR_VIEWS,
+  DEFAULT_TOUR_DURATION,
   createLocalStore,
   createMemoryStore,
   debounce,
@@ -126,6 +129,14 @@ export class ViewerPanel {
       oneLayer: false,
       /** Whether the print is playing back, and where it has got to. */
       playing: false,
+      /** The turntable: whether it is turning, and how fast, in radians/ms. */
+      spinning: false,
+      spinSpeed: 0.4,
+      /** Recorded views, in order, and how long a tour through them lasts. */
+      tour: [],
+      tourDuration: DEFAULT_TOUR_DURATION,
+      /** Whether a tour is flying, and where it started. */
+      touring: false,
       /** Where the cut was when the one-layer switch was last on. */
       lastCut: 0,
       bed: { available: false, visible: false },
@@ -355,6 +366,12 @@ export class ViewerPanel {
       paletteOverrides: Object.keys(state.paletteOverrides).length === 0
         ? undefined
         : state.paletteOverrides,
+      // The tour belongs to the file: which corners are worth showing is a
+      // judgement about this print, and angles recorded for one model mean
+      // nothing on the next.
+      tour: state.tour.length === 0 ? undefined : state.tour,
+      tourDuration: state.tourDuration,
+      spinSpeed: state.spinSpeed,
     };
   }
 
@@ -430,6 +447,9 @@ export class ViewerPanel {
         this.state.bed = this.viewer.bedInfo();
       }
     }
+    if (Array.isArray(saved.tour)) this.state.tour = saved.tour;
+    if (saved.tourDuration !== undefined) this.state.tourDuration = saved.tourDuration;
+    if (saved.spinSpeed !== undefined) this.state.spinSpeed = saved.spinSpeed;
     if (saved.camera !== undefined) {
       // The whole camera, not just the angle: a file that was zoomed into a detail
       // should reopen on that detail. `setCamera` takes whatever the blob has, so
@@ -509,6 +529,16 @@ export class ViewerPanel {
       onClick: () => this.togglePlay(),
     });
     this.playButton.hidden = true;
+    // Camera motion: a turntable, and a tour through views the user records. It
+    // needs a viewer but not a sliced file -- looking round a model is as useful
+    // as looking round a plate -- so it is offered whenever something is drawn.
+    this.motionButton = this.button({
+      icon: 'motion',
+      label: t('motion.title'),
+      toggle: true,
+      onClick: () => this.toggleMotion(),
+    });
+    this.motionButton.hidden = true;
     // Tracing replaces the interactive view rather than sitting beside it: the two
     // are the same scene, and showing both would halve the space for each. The
     // button toggles, and the overlay can be dismissed with it.
@@ -543,6 +573,7 @@ export class ViewerPanel {
       this.bedButton,
       this.snapshotButton,
       this.playButton,
+      this.motionButton,
       this.traceButton,
       this.saveTracedButton,
       this.backgroundPicker.node,
@@ -756,6 +787,15 @@ export class ViewerPanel {
     // broken here as well: a step that survives this would call into a viewer
     // whose context has gone.
     this.stopPlay(true);
+    // The motion loops are pending-callback chains too, and both write to the
+    // camera: a step that outlived the viewer would call into a disposed context.
+    this.state.spinning = false;
+    this.cancelFrame(this.spinHandle);
+    this.spinHandle = undefined;
+    this.cancelFrame(this.tourHandle);
+    this.tourHandle = undefined;
+    this.state.touring = false;
+    this.motion?.hide();
     this.bvh = null;
     if (this.tracer !== null && this.tracer !== undefined) {
       this.tracer.dispose();
@@ -1370,7 +1410,7 @@ export class ViewerPanel {
    * is the mistake that once made the trace loop count to 109 against a budget of
    * 96: the abandoned one started a second chain beside the first.
    */
-  frame(handle, run) {
+  frame(handle, run, slot = 'previewHandle') {
     if (handle !== undefined) return handle;
     const view = this.document.defaultView;
     if (view === undefined || view === null) return undefined;
@@ -1378,10 +1418,16 @@ export class ViewerPanel {
     const once = () => {
       if (done) return;
       done = true;
-      if (this.previewHandle !== undefined) {
-        view.cancelAnimationFrame?.(this.previewHandle.frame);
-        view.clearTimeout?.(this.previewHandle.timer);
-        this.previewHandle = undefined;
+      // The slot to clear is named by the caller, not assumed: three loops use
+      // this helper now, and cancelling `previewHandle` from the turntable's
+      // callback would leave the turntable's own timer to fire a second chain
+      // beside the first -- the exact shape of the trace-loop bug that counted to
+      // 109 against a budget of 96.
+      const held = this[slot];
+      if (held !== undefined) {
+        view.cancelAnimationFrame?.(held.frame);
+        view.clearTimeout?.(held.timer);
+        this[slot] = undefined;
       }
       run();
     };
@@ -1454,6 +1500,237 @@ export class ViewerPanel {
     this.viewer?.setPlainLighting(this.state.plainLighting);
     this.syncToolbar();
     this.queueSave();
+  }
+
+  /* --------------------------------------------------------------- motion -- */
+
+  /**
+   * Open or close the motion popover.
+   *
+   * The popover holds two things that both move the camera, so opening it does not
+   * start anything: a control that begins moving the view the moment it is opened
+   * is a control you cannot read.
+   */
+  toggleMotion() {
+    const { state } = this;
+    if (this.motion?.isOpen) {
+      this.motion.hide();
+      this.syncToolbar();
+      return;
+    }
+    this.motion ??= new MotionControl({
+      t: this.t,
+      document: this.document,
+      host: this.root,
+      callbacks: {
+        onSpin: () => this.toggleSpin(),
+        onSpeed: (value) => this.setSpinSpeed(value),
+        onTour: () => this.startTour(),
+        onStop: () => this.stopMotion(),
+        onRecord: () => this.recordView(),
+        onForget: (index) => this.forgetView(index),
+        onGoTo: (index) => this.goToView(index),
+        onDuration: (value) => this.setTourDuration(value),
+      },
+    });
+    this.motion.show(this.motionButton, this.motionState());
+    this.syncToolbar();
+  }
+
+  /** The motion popover's view of the state. */
+  motionState() {
+    const { state } = this;
+    return {
+      spinning: state.spinning,
+      speed: state.spinSpeed,
+      views: state.tour,
+      duration: state.tourDuration,
+      playing: state.touring,
+    };
+  }
+
+  /** Rewrite the popover, if it is open. */
+  syncMotion() {
+    if (this.motion?.isOpen) this.motion.update(this.motionState());
+  }
+
+  /**
+   * Start or stop the turntable.
+   *
+   * The turntable turns the *camera*, not the model: rotating the mesh would carry
+   * the build plate and the key light with it, and a preview whose light swings
+   * around is describing a material it is not showing.
+   */
+  toggleSpin() {
+    const { state, viewer } = this;
+    if (viewer === null) return;
+    state.spinning = !state.spinning;
+    if (state.spinning) {
+      // A tour and a turntable are two hands on the same wheel; one at a time.
+      if (state.touring) this.stopTour();
+      this.spinLast = this.now();
+      this.stepSpin();
+    } else {
+      this.cancelFrame(this.spinHandle);
+      this.spinHandle = undefined;
+    }
+    this.syncMotion();
+    this.syncToolbar();
+  }
+
+  /** How fast the turntable turns, in radians per millisecond. */
+  setSpinSpeed(speed) {
+    const value = Math.max(0.05, Math.min(3, Number(speed) || 0.4));
+    this.state.spinSpeed = value;
+    // Restart the clock reference so a speed change does not apply retroactively
+    // to the time already elapsed at the old one.
+    this.spinLast = this.now();
+    this.syncMotion();
+    this.queueSave();
+  }
+
+  /**
+   * One step of the turntable.
+   *
+   * The angle advances by elapsed time rather than by a fixed increment per frame:
+   * a fixed step would spin at whatever rate the machine happens to render, which
+   * on a large plate is visibly slower than on a small one.
+   */
+  stepSpin() {
+    if (!this.state.spinning) return;
+    const { viewer, state } = this;
+    if (viewer === null) { this.state.spinning = false; return; }
+    const now = this.now();
+    const elapsed = Math.min(100, Math.max(0, now - (this.spinLast ?? now)));
+    this.spinLast = now;
+    const camera = viewer.orientation();
+    // Yaw only. A turntable that wandered in pitch would end up looking at the
+    // plate edge-on, which is not what "turn it round" means.
+    viewer.setCamera({ ...camera, yaw: camera.yaw + state.spinSpeed * elapsed / 1000 });
+    this.scheduleSpinStep();
+  }
+
+  /** Ask for the next turntable step. */
+  scheduleSpinStep() {
+    if (!this.state.spinning) return;
+    this.spinHandle = this.frame(this.spinHandle, () => {
+      this.spinHandle = undefined;
+      this.stepSpin();
+    }, 'spinHandle');
+  }
+
+  /* ------------------------------------------------------------ the tour -- */
+
+  /** Record the camera as it stands as the next view. */
+  recordView() {
+    const { viewer, state } = this;
+    if (viewer === null) return;
+    if (state.tour.length >= MAX_TOUR_VIEWS) {
+      this.showStatus(this.t('motion.tooMany', { max: String(MAX_TOUR_VIEWS) }));
+      return;
+    }
+    state.tour = [...state.tour, viewer.orientation()];
+    this.syncMotion();
+    this.queueSave();
+  }
+
+  /** Forget one recorded view. */
+  forgetView(index) {
+    const { state } = this;
+    if (!Number.isInteger(index) || index < 0 || index >= state.tour.length) return;
+    state.tour = state.tour.filter((_, at) => at !== index);
+    this.syncMotion();
+    this.queueSave();
+  }
+
+  /** Jump to one recorded view, without flying there. */
+  goToView(index) {
+    const { viewer, state } = this;
+    if (viewer === null) return;
+    const view = state.tour[index];
+    if (!isCamera(view)) return;
+    this.stopMotion();
+    viewer.setCamera(view);
+  }
+
+  /** Set how long a tour takes. */
+  setTourDuration(value) {
+    const ms = Math.max(800, Math.min(60000, Math.round(Number(value) || 4000)));
+    this.state.tourDuration = ms;
+    this.syncMotion();
+    this.queueSave();
+  }
+
+  /**
+   * Fly through the recorded views.
+   *
+   * The camera is set from the tour's own arithmetic each step rather than advanced
+   * incrementally, so a slow frame skips forward instead of slowing the flight
+   * down: an animation of a fixed length should take that long.
+   */
+  startTour() {
+    const { state } = this;
+    if (state.tour.length === 0) return;
+    if (state.spinning) this.toggleSpin();
+    this.stopTour();
+    state.touring = true;
+    this.tourStarted = this.now();
+    this.stepTour();
+    this.syncMotion();
+    this.syncToolbar();
+  }
+
+  /** One step of the tour. */
+  stepTour() {
+    if (!this.state.touring) return;
+    const { viewer, state } = this;
+    if (viewer === null) { state.touring = false; return; }
+    const elapsed = this.now() - (this.tourStarted ?? this.now());
+    const sample = sampleTour(state.tour, state.tourDuration, elapsed);
+    if (sample === null) { this.stopTour(); return; }
+    viewer.setCamera(sample.camera);
+    if (elapsed >= state.tourDuration) {
+      // The last view is left on screen, the same way a finished print is.
+      this.stopTour(true);
+      return;
+    }
+    this.tourHandle = this.frame(this.tourHandle, () => {
+      this.tourHandle = undefined;
+      this.stepTour();
+    }, 'tourHandle');
+  }
+
+  /**
+   * Stop a tour.
+   *
+   * @param finished - `true` when the tour reached its end, so the last view stays.
+   */
+  stopTour(finished = false) {
+    this.cancelFrame(this.tourHandle);
+    this.tourHandle = undefined;
+    const wasTouring = this.state.touring;
+    this.state.touring = false;
+    if (wasTouring) {
+      this.syncMotion();
+      this.syncToolbar();
+    }
+    void finished;
+  }
+
+  /** Stop whichever motion is running. */
+  stopMotion() {
+    if (this.state.touring) this.stopTour();
+    if (this.state.spinning) this.toggleSpin();
+    this.syncMotion();
+    this.syncToolbar();
+  }
+
+  /** Cancel a scheduled frame from either motion loop. */
+  cancelFrame(handle) {
+    if (handle === undefined) return;
+    const view = this.document.defaultView;
+    view?.cancelAnimationFrame?.(handle.frame);
+    view?.clearTimeout?.(handle.timer);
   }
 
   /* ------------------------------------------------------------- playback -- */
@@ -1753,6 +2030,15 @@ export class ViewerPanel {
     // while the first is still under the pointer is a control that jumps.
     const glyph = icon(state.playing ? 'pause' : 'play', 16);
     if (glyph !== null) this.playButton.replaceChildren(glyph);
+
+    // Motion needs a drawn scene, not a sliced one: a turntable round a model is
+    // as useful as round a plate. The button reads as pressed while anything is
+    // moving, so the way to stop is where it started.
+    const moving = state.spinning || state.touring;
+    this.motionButton.hidden = !ready || state.tracing === true;
+    this.motionButton.disabled = !ready;
+    this.motionButton.classList.toggle('is-pressed', moving || this.motion?.isOpen === true);
+    this.motionButton.setAttribute('aria-pressed', String(moving));
     this.traceButton.disabled = !ready;
     this.traceButton.classList.toggle('is-pressed', state.tracing);
     this.traceButton.setAttribute('aria-pressed', String(state.tracing));
