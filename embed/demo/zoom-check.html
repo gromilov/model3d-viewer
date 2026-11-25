@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>zoompan</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0a0b0c; color: #d6d8db; font: 12px/1.5 ui-monospace, Menlo, monospace; }
+  #box { width: 480px; height: 420px; margin: 8px; }
+  #log { margin: 8px; white-space: pre; color: #8a949c; }
+</style>
+</head>
+<body>
+<div id="box"></div>
+<div id="log">start</div>
+<script type="module">
+  import { mount } from '../dist/model3d-viewer.mjs';
+
+  // Zoom and pan are two thirds of "where I was looking", and neither was stored.
+  // The other half of that bug is in the engine: a wheel zoom or a right-drag pan
+  // changed the camera without telling the listeners, so nothing downstream -- the
+  // settings store included -- could have noticed even if it had wanted to.
+  //
+  // So this asserts the round trip the way the real case works: a camera is set on
+  // one panel through the same gestures a hand uses, and a *second* panel built
+  // from scratch has to come back to it.
+
+  const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+  window.addEventListener('unhandledrejection', (e) => {
+    document.title = 'REJ ' + (e.reason?.message ?? e.reason);
+  });
+
+  const failures = [];
+  const check = (ok, what) => { log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) failures.push(what); };
+  const near = (a, b, tolerance = 1e-3) => Math.abs(a - b) <= tolerance;
+
+  const store = (() => {
+    const map = new Map();
+    return {
+      read: (k) => map.get(k) ?? null,
+      write: (k, v) => { map.set(k, v); return true; },
+      remove: (k) => { map.delete(k); },
+      keys: () => [...map.keys()],
+      persistent: false,
+    };
+  })();
+
+  const mountPanel = () => new Promise((resolve) => {
+    const host = document.createElement('div');
+    host.style.cssText = 'width:480px;height:420px';
+    document.getElementById('box').append(host);
+    const panel = mount(host, {
+      source: './fixtures/sliced.3mf', language: 'ru', view: 'sliced',
+      // One key for both panels: the point is the round trip.
+      remember: store, storageKey: 'test/camera.3mf',
+      onStatus: (status) => { if (status.kind !== 'loading') resolve(panel); },
+    });
+  });
+
+  const first = await mountPanel();
+  await sleep(600);
+
+  // --- gestures, not setters ------------------------------------------------
+  // The bug was in the gesture paths: they changed the camera and did not notify.
+  // Driving the real wheel and the real drag is what covers that; calling
+  // `setZoom` would pass on code that is still broken for a hand.
+  const canvas = first.canvas;
+  const box = canvas.getBoundingClientRect();
+  canvas.dispatchEvent(new WheelEvent('wheel', {
+    deltaY: -420, clientX: box.left + box.width / 2, clientY: box.top + box.height / 2,
+    bubbles: true, cancelable: true,
+  }));
+  await sleep(120);
+
+  // Right-button drag: pan.
+  canvas.dispatchEvent(new PointerEvent('pointerdown', {
+    pointerId: 1, button: 2, buttons: 2, clientX: box.left + 200, clientY: box.top + 200, bubbles: true,
+  }));
+  canvas.dispatchEvent(new PointerEvent('pointermove', {
+    pointerId: 1, button: 2, buttons: 2, clientX: box.left + 260, clientY: box.top + 240, bubbles: true,
+  }));
+  canvas.dispatchEvent(new PointerEvent('pointerup', {
+    pointerId: 1, button: 2, buttons: 0, clientX: box.left + 260, clientY: box.top + 240, bubbles: true,
+  }));
+  await sleep(700);
+
+  const gestureCamera = first.viewer.orientation();
+  check(near(gestureCamera.zoom, 1) === false, 'the wheel changed the zoom (' + gestureCamera.zoom.toFixed(3) + ')');
+  check(gestureCamera.pan.some((v) => Math.abs(v) > 1e-4),
+    'the right-drag moved the view (' + gestureCamera.pan.map((v) => v.toFixed(3)).join(', ') + ')');
+
+  // --- was any of it written? ----------------------------------------------
+  first.flushSave();
+  await sleep(200);
+  const blob = store.read('test/camera.3mf');
+  check(blob !== null, 'the settings were written after a gesture');
+  const parsed = blob === null ? null : JSON.parse(blob);
+  check(parsed?.camera?.zoom !== undefined, 'the stored camera carries the zoom');
+  check(Array.isArray(parsed?.camera?.pan), 'and the pan');
+
+  // --- a fresh panel has to come back to it ---------------------------------
+  first.dispose();
+  await sleep(200);
+  const second = await mountPanel();
+  await sleep(700);
+  const restored = second.viewer.orientation();
+  check(near(restored.zoom, gestureCamera.zoom),
+    'a new panel restores the zoom (' + restored.zoom.toFixed(3) + ' against ' + gestureCamera.zoom.toFixed(3) + ')');
+  check(restored.pan.every((v, i) => near(v, gestureCamera.pan[i])),
+    'and the pan (' + restored.pan.map((v) => v.toFixed(4)).join(', ') + ')');
+  check(near(restored.yaw, gestureCamera.yaw) && near(restored.pitch, gestureCamera.pitch),
+    'and still the angle, which always worked');
+
+  // --- a stale blob, from before zoom was recorded --------------------------
+  // The shape only grew, so an old file keeps working: its angle opens, and the
+  // absence of a zoom is not a reason to throw the camera away.
+  store.write('test/camera.3mf', JSON.stringify({ version: 1, camera: { yaw: -0.2, pitch: 0.1 } }));
+  second.dispose();
+  await sleep(200);
+  const third = await mountPanel();
+  await sleep(700);
+  const stale = third.viewer.orientation();
+  check(near(stale.yaw, -0.2) && near(stale.pitch, 0.1), 'an old blob still restores its angle');
+  check(near(stale.zoom, 1), 'and opens at the default zoom rather than a broken one (' + stale.zoom + ')');
+
+  // Reset must put the camera back, and that has to be stored too -- otherwise the
+  // reset button only moves the view until the file is reopened.
+  third.reset();
+  await sleep(700);
+  const afterReset = third.viewer.orientation();
+  check(near(afterReset.zoom, 1), 'reset returns the zoom');
+  check(afterReset.pan.every((v) => near(v, 0)), 'reset returns the pan');
+
+  document.title = failures.length === 0 ? 'ZOOMCHECK ok' : 'FAIL ' + failures.join('; ');
+</script>
+</body>
+</html>

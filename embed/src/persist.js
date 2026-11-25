@@ -222,7 +222,22 @@ export function validateSnapshot(raw) {
     // The camera's pitch is clamped shy of the poles by the viewer; a stored value
     // beyond that would be silently clamped on the way in anyway, so it is
     // accepted here and left to the viewer.
-    if (Number.isFinite(yaw) && Number.isFinite(pitch)) out.camera = { yaw, pitch };
+    if (Number.isFinite(yaw) && Number.isFinite(pitch)) {
+      const camera = { yaw, pitch };
+      // Zoom and pan are validated on their own, and each is optional. A blob
+      // written before they were stored has neither, and must still open on the
+      // angle it does have -- dropping the whole camera because a field it never
+      // had is missing would throw away good data. That is also why the version
+      // is not bumped: the shape only grew, and the old files stay readable.
+      if (Number.isFinite(raw.camera.zoom) && raw.camera.zoom > 0) {
+        camera.zoom = raw.camera.zoom;
+      }
+      const pan = raw.camera.pan;
+      if (Array.isArray(pan) && pan.length === 3 && pan.every((value) => Number.isFinite(value))) {
+        camera.pan = [pan[0], pan[1], pan[2]];
+      }
+      out.camera = camera;
+    }
   }
 
   if (Array.isArray(raw.surfaces)) {

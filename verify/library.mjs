@@ -359,6 +359,25 @@ const CHECKS = [
     pixels: { minColours: 16, minNonBackground: 0.02 },
   },
   {
+    // Zoom and pan are two thirds of "where I was looking" and neither was stored.
+    // The other half of that bug was in the engine: a wheel zoom and a right-drag
+    // pan moved the camera without telling the listeners, so the settings store
+    // could not have noticed even if it had been asked to.
+    //
+    // The page drives the real gestures rather than the setters, because the
+    // setters were never the broken part -- `setZoom` already notified, and the
+    // hand never calls it. Then it builds a second panel from scratch and asserts
+    // the camera comes back, which is the only shape of this that proves a round
+    // trip rather than a write.
+    name: 'embed: zoom and pan are remembered per file',
+    page: 'zoom-check.html',
+    size: [520, 700],
+    needs: 'sliced.3mf',
+    expect: /ZOOMCHECK ok/,
+    reject: /ERR|REJ|FAIL/,
+    pixels: { minColours: 8, minNonBackground: 0.01 },
+  },
+  {
     // A host embeds the viewer as an element and says how tall it should be with a
     // `height` attribute. That attribute did nothing -- it was not observed, and a
     // custom element is `display: inline` until something makes it block, so an

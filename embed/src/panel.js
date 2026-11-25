@@ -406,7 +406,10 @@ export class ViewerPanel {
       }
     }
     if (saved.camera !== undefined) {
-      this.viewer?.setOrbit(saved.camera.yaw, saved.camera.pitch);
+      // The whole camera, not just the angle: a file that was zoomed into a detail
+      // should reopen on that detail. `setCamera` takes whatever the blob has, so
+      // a view stored before zoom and pan were recorded still restores its angle.
+      this.viewer?.setCamera(saved.camera);
     }
     // The layer range is applied after the view, since a different mesh has a
     // different number of layers and the stored range may no longer fit.

@@ -941,6 +941,17 @@ const MIN_ZOOM = 0.02;
 const MAX_ZOOM = 6;
 
 /**
+ * How far a restored pan may sit from the origin, in plate radii.
+ *
+ * A pan is unconstrained while it is being dragged -- the hand knows where the
+ * model is -- but a *stored* one comes from another session, possibly another
+ * file. Without a limit a hand-edited or mismatched blob could put the model
+ * off screen with no way back but the reset button, which is a state the viewer
+ * should never be able to enter by restoring its own settings.
+ */
+const PAN_LIMIT = 6;
+
+/**
  * Create a viewer bound to one canvas.
  * @param canvas - the drawing surface; its CSS size drives the backing store.
  * @returns the viewer handle.
@@ -1664,6 +1675,7 @@ export function createViewer(canvas) {
         if (pinch.start > 4 && now > 4) {
           const next = pinch.zoom * (pinch.start / now);
           zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, next));
+          notifyOrbit();
           requestDraw();
         }
         return;
@@ -1696,6 +1708,9 @@ export function createViewer(canvas) {
         pan[1] - dx * right[1] - dy * up[1],
         pan[2] - dx * right[2] - dy * up[2],
       ];
+      // A pan moves the view as much as an orbit does, so the listeners -- the
+      // cube's frame of reference and the per-file settings -- hear about it too.
+      notifyOrbit();
     } else {
       yaw -= deltaX * 0.008;
       // Stop just shy of the poles so the up vector never degenerates.
@@ -1761,6 +1776,7 @@ export function createViewer(canvas) {
   const setZoom = (value) => {
     if (!Number.isFinite(value) || value <= 0) return;
     zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, value));
+    notifyOrbit();
     draw();
   };
 
@@ -1769,6 +1785,7 @@ export function createViewer(canvas) {
     // Zoom runs from 50x closer than the framing distance to 6x farther, which
     // is deep enough to read the wall of a single 0.2 mm layer.
     zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoom * Math.exp(event.deltaY * 0.0015)));
+    notifyOrbit();
     draw();
   };
 
@@ -1868,6 +1885,44 @@ export function createViewer(canvas) {
     if (!Number.isFinite(nextYaw) || !Number.isFinite(nextPitch)) return;
     yaw = nextYaw;
     pitch = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, nextPitch));
+    notifyOrbit();
+    draw();
+  };
+
+  /**
+   * Restore a whole camera: angle, distance and the shift across the plate.
+   *
+   * One call rather than three, because the three belong together and restoring
+   * an angle alone would reopen a panned view at the origin -- the framing the
+   * user had would come back wrong in a way that looks like a bug in the pan.
+   * Omitted parts keep their current value, so a stored view from before zoom was
+   * recorded still restores its angle.
+   *
+   * @param camera - any of `yaw`, `pitch`, `zoom` and `pan`; the rest untouched.
+   */
+  const setCamera = (camera) => {
+    if (typeof camera !== 'object' || camera === null) return;
+    if (Number.isFinite(camera.yaw) && Number.isFinite(camera.pitch)) {
+      yaw = camera.yaw;
+      pitch = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, camera.pitch));
+    }
+    if (Number.isFinite(camera.zoom) && camera.zoom > 0) {
+      zoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, camera.zoom));
+    }
+    const next = camera.pan;
+    if (Array.isArray(next) && next.length === 3 && next.every((value) => Number.isFinite(value))) {
+      // Clamped to something a plate can actually occupy: a stored pan from a
+      // different file, or a hand-edited blob, could otherwise put the model off
+      // screen with no way back but the reset button.
+      //
+      // The limit is in the same units the pan itself uses, which is the
+      // normalised scene -- the mesh is scaled so its radius is 1 -- not the raw
+      // file. Multiplying by `meshScale` here looked right and was wrong by two
+      // orders of magnitude: it turned a six-radius allowance into 0.06, and every
+      // restored pan was quietly clamped to a fraction of what it should be.
+      const limit = PAN_LIMIT;
+      pan = [0, 1, 2].map((index) => Math.max(-limit, Math.min(limit, next[index])));
+    }
     notifyOrbit();
     draw();
   };
@@ -2134,8 +2189,13 @@ export function createViewer(canvas) {
     ? null
     : `#${background.map((channel) => Math.round(channel * 255).toString(16).padStart(2, '0')).join('')}`);
 
-  /** The camera's current orbit, in radians, so a cube can turn to match. */
-  const orientation = () => ({ yaw, pitch });
+  /**
+   * The camera, in the shape the settings store and `setCamera` use.
+   *
+   * It began as the orbit alone, for the cube. It is now the whole camera, since
+   * that is what "where I was looking" means and what a file should reopen on.
+   */
+  const orientation = () => ({ yaw, pitch, zoom, pan: [pan[0], pan[1], pan[2]] });
 
   /**
    * Everything needed to reproduce this frame elsewhere.
@@ -2192,22 +2252,32 @@ export function createViewer(canvas) {
     };
   };
 
-  /** Tell every listener where the camera now points. */
+  /**
+   * Tell every listener where the camera now points.
+   *
+   * The orbit is not the whole camera: zoom and pan are the other two thirds of
+   * "where I was looking", and a listener that persists the view needs all three.
+   * They were not reported at all, and zoom and pan did not even call this -- so a
+   * wheel zoom or a right-drag pan left the stored view untouched and the file
+   * reopened at the old framing. The cube ignores the extra fields, which is why
+   * widening the payload costs it nothing.
+   */
   const notifyOrbit = () => {
     if (orbitListeners.size === 0) return;
-    const angles = { yaw, pitch };
+    const camera = { yaw, pitch, zoom, pan: [pan[0], pan[1], pan[2]] };
     // Copied first: a listener that unsubscribes while being notified would
     // otherwise mutate the set mid-iteration.
-    for (const listener of [...orbitListeners]) listener(angles);
+    for (const listener of [...orbitListeners]) listener(camera);
   };
 
   /**
-   * Follow the camera's orbit.
+   * Follow the camera.
    *
    * Any number of callers may watch: the navigation cube and the per-file
    * settings both do, and neither should be able to displace the other.
    *
-   * @param callback - called with `{ yaw, pitch }` whenever the orbit changes.
+   * @param callback - called with `{ yaw, pitch, zoom, pan }` whenever the camera
+   *   moves, by any means: a drag, the wheel, a pinch, a cube click or a reset.
    * @returns an unsubscribe function.
    */
   const watchOrbit = (callback) => {
@@ -2280,5 +2350,5 @@ export function createViewer(canvas) {
     gl.deleteProgram(bedProgram.program);
   };
 
-  return { setMesh, setMode, setLayerRange, layerInfo, setBedVisible, bedInfo, setView, setOrbit, orientation, sceneState, setBackground, backgroundInfo, setPlainLighting, plainLightingInfo, renderer: () => rendererInfo, setSurface, surfaceInfo, setLightLevel, renderToImage, setPalette, paletteInfo, watchOrbit, reset, dispose, redraw: draw, usesColours, setZoom, zoomInfo: () => zoom };
+  return { setMesh, setMode, setLayerRange, layerInfo, setBedVisible, bedInfo, setView, setOrbit, setCamera, orientation, sceneState, setBackground, backgroundInfo, setPlainLighting, plainLightingInfo, renderer: () => rendererInfo, setSurface, surfaceInfo, setLightLevel, renderToImage, setPalette, paletteInfo, watchOrbit, reset, dispose, redraw: draw, usesColours, setZoom, zoomInfo: () => zoom };
 }
