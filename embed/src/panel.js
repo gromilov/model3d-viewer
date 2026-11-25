@@ -2071,14 +2071,20 @@ class LayerSliderControl {
     ]);
     stage.append(this.container);
 
-    // Narrow screens get a gesture instead of a permanent strip: a thumb dragged
-    // down the right edge walks the cut through the plate, and the slider itself
-    // stays out of the way. The strip is not removed — it is what desktop uses —
+    // Narrow *touch* screens get a gesture instead of a permanent strip: a thumb
+    // dragged down the right edge walks the cut through the plate, and the slider
+    // stays out of the way. The strip is not removed -- it is what desktop uses --
     // it is hidden by the compact class and mirrored by the gesture.
+    //
+    // The condition is width AND a coarse pointer, not width alone. A narrow
+    // desktop window is the ordinary case for this viewer: the DSH right sidebar
+    // is about 400 pixels wide on a laptop, and keying the gesture off width alone
+    // hid the slider there and replaced it with a gesture that needs a thumb --
+    // leaving a mouse user with no way to change the layer at all.
     this.stage = stage;
     this.gesture = null;
     this.hideTimer = 0;
-    this.compact = stage.clientWidth > 0 && stage.clientWidth < 760;
+    this.compact = stage.clientWidth > 0 && stage.clientWidth < 760 && isTouchFirst();
     if (this.compact) {
       this.container.classList.add('is-compact');
       this.hintBar = el('div', { class: 'm3d-layer-hint-bar' });
@@ -2322,6 +2328,23 @@ class LayerSliderControl {
       this.hint?.remove();
     }
     this.container.remove();
+  }
+}
+
+/**
+ * Whether this device is driven by a finger rather than a pointer.
+ *
+ * `pointer: coarse` is the honest question, and it exists for exactly this: a
+ * phone is coarse and narrow, a laptop is fine and may be narrow too. Where the
+ * media query is unavailable -- an old browser, a test harness that answers no
+ * media queries at all -- the answer is no, because a visible slider with a mouse
+ * is useful and a hidden one is not.
+ */
+function isTouchFirst() {
+  try {
+    return globalThis.matchMedia?.('(pointer: coarse)').matches === true;
+  } catch {
+    return false;
   }
 }
 
