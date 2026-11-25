@@ -1,0 +1,25 @@
+<!doctype html><html><head><meta charset="utf-8"><title>playlook</title>
+<style>html,body{margin:0;background:#14100c}#box{width:700px;height:520px}</style></head>
+<body><div id="box"></div>
+<script type="module">
+import { mount } from '../dist/model3d-viewer.mjs';
+const panel = mount(document.getElementById('box'), {
+  source: './fixtures/sliced.3mf', language: 'ru', view: 'sliced', remember: false,
+  onStatus: async (s) => {
+    if (s.kind !== 'ready') return;
+    await new Promise((r) => setTimeout(r, 700));
+    panel.toggleBed();
+    panel.startPlay();
+    // Frozen part-way through the first layer: the interesting frame is a sheet
+    // of plastic half-laid, which is what the player exists to show.
+    await new Promise((r) => setTimeout(r, 1400));
+    panel.stopPlay();
+    panel.startPlay();
+    await new Promise((r) => setTimeout(r, 2100));
+    // Pause the loop by hand so the screenshot is one deterministic frame.
+    panel.state.playing = false;
+    await new Promise((r) => setTimeout(r, 300));
+    document.title = 'SHOT';
+  },
+});
+</script></body></html>

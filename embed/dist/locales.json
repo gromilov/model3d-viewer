@@ -64,7 +64,10 @@
     "picker.palette": "Palette",
     "picker.eyedropper": "Pick a colour from the screen",
     "picker.ok": "OK",
-    "picker.cancel": "Cancel"
+    "picker.cancel": "Cancel",
+    "controls.play": "Play the print",
+    "controls.playStop": "Stop the playback",
+    "status.printingLayer": "Printing layer {layer} of {total}"
   },
   "ru": {
     "meta": {
@@ -131,6 +134,9 @@
     "picker.palette": "Палитра",
     "picker.eyedropper": "Взять цвет с экрана",
     "picker.ok": "Ок",
-    "picker.cancel": "Отмена"
+    "picker.cancel": "Отмена",
+    "controls.play": "Проиграть печать",
+    "controls.playStop": "Остановить проигрывание",
+    "status.printingLayer": "Печать слоя {layer} из {total}"
   }
 }

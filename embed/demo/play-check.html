@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>play</title>
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0a0b0c; color: #d6d8db; font: 12px/1.5 ui-monospace, Menlo, monospace; }
+  #box { width: 560px; height: 480px; margin: 8px; }
+  #log { margin: 8px; white-space: pre; color: #8a949c; }
+</style>
+</head>
+<body>
+<div id="box"></div>
+<div id="log">start</div>
+<script type="module">
+  import { mount } from '../dist/model3d-viewer.mjs';
+
+  // The play button walks the plate in the file's own order: the first layer
+  // stroke by stroke, everything above it a layer at a time. What matters is that
+  // it is really reading that order and really drawing the intermediate states --
+  // a player that jumped from nothing to the whole plate would pass any check that
+  // only looked at the ends.
+
+  const log = (s) => { document.getElementById('log').textContent += '\n' + s; };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  window.addEventListener('error', (e) => { document.title = 'ERR ' + e.message; });
+  window.addEventListener('unhandledrejection', (e) => {
+    document.title = 'REJ ' + (e.reason?.message ?? e.reason);
+  });
+
+  const failures = [];
+  const check = (ok, what) => { log((ok ? 'ok   ' : 'FAIL ') + what); if (!ok) failures.push(what); };
+
+  const panel = mount(document.getElementById('box'), {
+    source: './fixtures/sliced.3mf', language: 'ru', view: 'sliced', remember: false,
+    onStatus: async (status) => {
+      if (status.kind !== 'ready') { if (status.kind === 'failed') document.title = 'FAIL ' + (status.message ?? ''); return; }
+      await sleep(700);
+
+      // --- the layout the player plans against ---------------------------
+      const layout = panel.viewer.strokeLayout();
+      check(Array.isArray(layout.layerFirst) && layout.layerFirst.length > 2,
+        'the plate reports where each layer begins (' + layout.layerFirst?.length + ' layers)');
+      check(layout.total > 0, 'and its stroke total (' + layout.total + ')');
+      const firstLayerSize = layout.layerFirst[1] - layout.layerFirst[0];
+      check(firstLayerSize > 2, 'the first layer has ' + firstLayerSize + ' strokes of its own, so it can be drawn gradually');
+
+      // --- what the engine draws for a given cut ------------------------
+      // The cut is asserted on the submitted instance count, which is the work the
+      // GPU is actually given. That is the number a laid-down stroke changes.
+      const canvas = panel.canvas;
+      const gl = canvas.getContext('webgl2') || canvas.getContext('webgl');
+      let instances = 0;
+      const real = gl.drawElementsInstanced.bind(gl);
+      gl.drawElementsInstanced = (mode, count, type, offset, n) => { instances += n; return real(mode, count, type, offset, n); };
+      const drawCount = () => { instances = 0; panel.viewer.redraw(); return instances; };
+
+      // Full plate, for the scale of it.
+      panel.setLayers(0, layout.layerFirst.length - 1, false);
+      await sleep(150);
+      const whole = drawCount();
+      check(whole > 100, 'the whole plate submits ' + whole + ' strokes');
+
+      // First layer only, no cut: a fraction of the plate.
+      panel.setLayers(0, 0, false);
+      await sleep(150);
+      const oneLayer = drawCount();
+      check(oneLayer > 0 && oneLayer < whole, 'one layer submits ' + oneLayer + ', a fraction of the plate');
+
+      // A cut inside the first layer draws strictly less than the whole layer, and
+      // more than nothing: that is "partly built".
+      panel.viewer.setStrokeCap(layout.layerFirst[0] + Math.floor(firstLayerSize / 2));
+      const half = drawCount();
+      check(half > 0 && half < oneLayer,
+        'a cut halfway through the first layer submits ' + half + ' of ' + oneLayer + ' strokes');
+      panel.viewer.setStrokeCap(null);
+
+      // --- drive the player, one step at a time -------------------------
+      // The clock is replaced rather than waited on: the harness runs Chrome with
+      // virtual time, so a real 2.6-second first layer would be untestable, and
+      // waiting is not the property being checked anyway.
+      let clock = 0;
+      panel.now = () => clock;
+      panel.setLayers(5, 9, true);
+      await sleep(200);
+
+      panel.startPlay();
+      check(panel.state.playing === true, 'play starts');
+      await sleep(120);
+
+      // A step early in the first layer: cut, inside layer 0.
+      clock = 300;
+      panel.stepPlay();
+      await sleep(60);
+      const early = drawCount();
+      const earlyRange = panel.state.layers.range;
+      check(earlyRange[0] === 0 && earlyRange[1] === 0, 'early playback is on the first layer (' + earlyRange.join('..') + ')');
+      check(early > 0, 'and drawing something (' + early + ' strokes)');
+
+      // A step later in the first layer: more of it, still layer 0.
+      clock = 1800;
+      panel.stepPlay();
+      await sleep(60);
+      const later = drawCount();
+      check(later > early, 'later in the first layer it has drawn more: ' + early + ' -> ' + later);
+      check(panel.state.layers.range[1] === 0, 'and is still on the first layer');
+
+      // Past the first layer: whole layers, one step per playLayerMs.
+      const stepMs = panel.constructor.playLayerMs;
+      clock = panel.constructor.playFirstLayerMs + stepMs * 3;
+      panel.stepPlay();
+      await sleep(60);
+      const layerNow = panel.state.layers.range[1];
+      check(layerNow >= 2, 'past the first layer it advances whole layers (now ' + layerNow + ')');
+      const wholeLayerStrokes = drawCount();
+      check(wholeLayerStrokes > later, 'and shows everything below: ' + later + ' -> ' + wholeLayerStrokes);
+
+      // --- the end ------------------------------------------------------
+      clock = panel.constructor.playFirstLayerMs + stepMs * (layout.layerFirst.length + 5);
+      panel.stepPlay();
+      await sleep(120);
+      check(panel.state.playing === false, 'playback stops itself when the print is done');
+      check(panel.state.layers.range[1] === layout.layerFirst.length - 1,
+        'and leaves the whole plate, which is what finished looks like (' + panel.state.layers.range[1] + ')');
+
+      // --- stopping puts the view back ----------------------------------
+      panel.stopPlay(true);
+      // A range inside this plate: the fixture has 22 layers, and a stale range is
+      // clamped on the way back in -- which is right, but would make this check
+      // assert the clamp instead of the restore.
+      const lastLayer = layout.layerFirst.length - 1;
+      const wantLow = Math.max(0, lastLayer - 4);
+      const wantHigh = lastLayer - 1;
+      panel.setLayers(wantLow, wantHigh, true);
+      await sleep(150);
+      panel.startPlay();
+      await sleep(120);
+      check(panel.state.playing === true, 'play starts again');
+      clock = 500;
+      panel.stepPlay();
+      await sleep(60);
+      panel.stopPlay();
+      await sleep(120);
+      check(panel.state.playing === false, 'stop halts it');
+      const restored = panel.state.layers.range;
+      check(restored[0] === wantLow && restored[1] === wantHigh,
+        'and restores the range the user had before pressing play (' + restored.join('..')
+          + ' for ' + wantLow + '..' + wantHigh + ')');
+      check(panel.state.layers.dim === true, 'and the dim-below setting with it');
+
+      // --- the button ----------------------------------------------------
+      const button = panel.playButton;
+      check(button.hidden === false, 'the play button is offered for a sliced plate');
+      check(button.querySelector('svg') !== null, 'and carries a glyph');
+      button.click();
+      await sleep(120);
+      check(panel.state.playing === true, 'clicking it starts playback');
+      check(button.getAttribute('aria-pressed') === 'true', 'and it reports itself pressed');
+      button.click();
+      await sleep(120);
+      check(panel.state.playing === false, 'clicking it again stops');
+
+      gl.drawElementsInstanced = real;
+      document.title = failures.length === 0 ? 'PLAYCHECK ok' : 'FAIL ' + failures.join('; ');
+    },
+  });
+</script>
+</body>
+</html>

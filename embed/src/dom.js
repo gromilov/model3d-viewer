@@ -66,6 +66,11 @@ export const ICONS = {
   trace: 'M8 2l1.5 4.5L14 8l-4.5 1.5L8 14l-1.5-4.5L2 8l4.5-1.5L8 2',
   // The same star, smaller, beside a downward arrow: that frame, written to a file.
   saveTraced: 'M6.6 2.4l1.15 3.45L11.2 7l-3.45 1.15L6.6 11.6L5.45 8.15L2 7l3.45-1.15L6.6 2.4 M12.4 9.4v4.2 M10.6 11.8l1.8 1.8 1.8-1.8',
+  // A play triangle, and the pause that replaces it while the print is running.
+  // Filled rather than stroked at this size -- a stroked triangle reads as an
+  // outline of a shape instead of a transport control.
+  play: 'M5 3l7 5-7 5z',
+  pause: 'M5 3h2.5v10H5z M8.5 3H11v10H8.5z',
   // A cross: dismissing a window. Two strokes rather than a glyph, so it stays
   // crisp at 10 pixels inside a colour window's head.
   close: 'M4 4l8 8 M12 4l-8 8',

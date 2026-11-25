@@ -63,5 +63,8 @@
   "picker.palette": "Palette",
   "picker.eyedropper": "Pick a colour from the screen",
   "picker.ok": "OK",
-  "picker.cancel": "Cancel"
+  "picker.cancel": "Cancel",
+  "controls.play": "Play the print",
+  "controls.playStop": "Stop the playback",
+  "status.printingLayer": "Printing layer {layer} of {total}"
 }

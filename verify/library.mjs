@@ -359,6 +359,22 @@ const CHECKS = [
     pixels: { minColours: 16, minNonBackground: 0.02 },
   },
   {
+    // The play button walks the plate in the file's own order: the first layer
+    // stroke by stroke, every layer above it a layer at a time.
+    //
+    // Asserted on the instance counts the GPU is actually given, not on the
+    // picture and not on the layer number alone. A player that jumped from
+    // nothing to the whole plate would satisfy any check that only looked at the
+    // ends; the property is that the intermediate states exist and grow.
+    name: 'embed: playback builds the plate in the file\'s own order',
+    page: 'play-check.html',
+    size: [600, 780],
+    needs: 'sliced.3mf',
+    expect: /PLAYCHECK ok/,
+    reject: /ERR|REJ|FAIL/,
+    pixels: { minColours: 8, minNonBackground: 0.01 },
+  },
+  {
     // Zoom and pan are two thirds of "where I was looking" and neither was stored.
     // The other half of that bug was in the engine: a wheel zoom and a right-drag
     // pan moved the camera without telling the listeners, so the settings store

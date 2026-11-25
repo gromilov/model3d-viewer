@@ -74,7 +74,10 @@ const LOCALES = {
     "picker.palette": "Palette",
     "picker.eyedropper": "Pick a colour from the screen",
     "picker.ok": "OK",
-    "picker.cancel": "Cancel"
+    "picker.cancel": "Cancel",
+    "controls.play": "Play the print",
+    "controls.playStop": "Stop the playback",
+    "status.printingLayer": "Printing layer {layer} of {total}"
   },
   ru: {
     "meta": {
@@ -141,7 +144,10 @@ const LOCALES = {
     "picker.palette": "Палитра",
     "picker.eyedropper": "Взять цвет с экрана",
     "picker.ok": "Ок",
-    "picker.cancel": "Отмена"
+    "picker.cancel": "Отмена",
+    "controls.play": "Проиграть печать",
+    "controls.playStop": "Остановить проигрывание",
+    "status.printingLayer": "Печать слоя {layer} из {total}"
   },
 };
 
@@ -2708,6 +2714,15 @@ function createViewer(canvas) {
    */
   let layerFirst = null;
   let strokeTotal = 0;
+  /**
+   * How far the print has got, as a stroke index, or null for "all of it".
+   *
+   * Playback needs to show a layer *partly* built: the first layer is watched
+   * stroke by stroke, and the rest arrive whole. The layer range cannot express
+   * that -- it names layers, and this names a position inside one -- so the run
+   * the range selects is additionally cut at this index.
+   */
+  let strokeCap = null;
   let dimBelow = false;
   let indexCount = 0;
   let meshScale = 1;
@@ -2845,6 +2860,8 @@ function createViewer(canvas) {
     dimBelow = false;
     layerFirst = mesh.layerFirst ?? null;
     strokeTotal = mesh.segments ?? 0;
+    // A new plate starts whole, whatever the previous one was cut down to.
+    strokeCap = null;
 
     meshCenter = [mesh.center[0], mesh.center[1], mesh.center[2]];
     const half = [
@@ -2889,6 +2906,9 @@ function createViewer(canvas) {
     segmentCount = 0;
     layerFirst = null;
     strokeTotal = 0;
+    // An index into a buffer that is being replaced means nothing. Cleared on
+    // every upload, or a switch of view would open the new plate cut short.
+    strokeCap = null;
     // A plain model carries no bed, so one left over from a sliced file must not
     // stay behind and be offered as if it belonged to this file.
     uploadBed(undefined);
@@ -2995,7 +3015,12 @@ function createViewer(canvas) {
     // The layer after the last visible one starts the next run, so its offset is
     // where this range ends; the final layer runs to the end of the buffer.
     const end = high + 1 < layerFirst.length ? layerFirst[high + 1] : strokeTotal;
-    return { first, count: Math.max(0, end - first) };
+    // The playback cap is applied after the range, not instead of it: a range
+    // says which layers, and the cap says how far into the last of them the
+    // extruder has got. Whichever is smaller wins, so the cap can never reveal a
+    // layer the slider is hiding.
+    const limited = strokeCap === null ? end : Math.min(end, strokeCap);
+    return { first, count: Math.max(0, limited - first) };
   };
 
   const draw = () => {
@@ -3436,6 +3461,9 @@ function createViewer(canvas) {
     pitch = 0.42;
     zoom = 1;
     pan = [0, 0, 0];
+    // A cut-through plate is a transient of the player, not a view: leaving it
+    // set would make the reset button return a half-drawn print.
+    strokeCap = null;
     notifyOrbit();
     draw();
   };
@@ -3938,6 +3966,35 @@ function createViewer(canvas) {
   /** How many layers the current plate has, or 0 for a model. */
   const layerInfo = () => ({ count: layerCount, range: [layerRange[0], layerRange[1]], dim: dimBelow });
 
+  /**
+   * Where every layer's strokes begin, plus the total.
+   *
+   * Playback is planned against this: it needs to know how many strokes each layer
+   * contains so the first layer can be given a share of the running time in
+   * proportion to its detail, and so a frame can ask for "the first 1 200 strokes"
+   * without re-deriving where layer 0 ends.
+   */
+  const strokeLayout = () => ({
+    total: strokeTotal,
+    layerFirst: layerFirst === null ? null : Array.from(layerFirst),
+  });
+
+  /**
+   * Cut the drawing at a stroke index.
+   *
+   * `null` removes the cut. Deliberately not clamped here to the visible run: the
+   * caller is a schedule that walks forward, and clamping would silently stall it
+   * at the last layer instead of letting it finish.
+   *
+   * @param index - strokes to draw from the start of the visible run, or null.
+   */
+  const setStrokeCap = (index) => {
+    const next = index === null || index === undefined ? null : Math.max(0, Math.round(index));
+    if (next === strokeCap) return;
+    strokeCap = next;
+    draw();
+  };
+
   /** Switch between shaded and wireframe drawing. */
   const setMode = (next) => {
     mode = next;
@@ -3991,7 +4048,7 @@ function createViewer(canvas) {
     gl.deleteProgram(bedProgram.program);
   };
 
-  return { setMesh, setMode, setLayerRange, layerInfo, setBedVisible, bedInfo, setView, setOrbit, setCamera, orientation, sceneState, setBackground, backgroundInfo, setPlainLighting, plainLightingInfo, renderer: () => rendererInfo, setSurface, surfaceInfo, setLightLevel, renderToImage, setPalette, paletteInfo, watchOrbit, reset, dispose, redraw: draw, usesColours, setZoom, zoomInfo: () => zoom };
+  return { setMesh, setMode, setLayerRange, layerInfo, strokeLayout, setStrokeCap, setBedVisible, bedInfo, setView, setOrbit, setCamera, orientation, sceneState, setBackground, backgroundInfo, setPlainLighting, plainLightingInfo, renderer: () => rendererInfo, setSurface, surfaceInfo, setLightLevel, renderToImage, setPalette, paletteInfo, watchOrbit, reset, dispose, redraw: draw, usesColours, setZoom, zoomInfo: () => zoom };
 }
 
 
@@ -4751,6 +4808,11 @@ const ICONS = {
   trace: 'M8 2l1.5 4.5L14 8l-4.5 1.5L8 14l-1.5-4.5L2 8l4.5-1.5L8 2',
   // The same star, smaller, beside a downward arrow: that frame, written to a file.
   saveTraced: 'M6.6 2.4l1.15 3.45L11.2 7l-3.45 1.15L6.6 11.6L5.45 8.15L2 7l3.45-1.15L6.6 2.4 M12.4 9.4v4.2 M10.6 11.8l1.8 1.8 1.8-1.8',
+  // A play triangle, and the pause that replaces it while the print is running.
+  // Filled rather than stroked at this size -- a stroked triangle reads as an
+  // outline of a shape instead of a transport control.
+  play: 'M5 3l7 5-7 5z',
+  pause: 'M5 3h2.5v10H5z M8.5 3H11v10H8.5z',
   // A cross: dismissing a window. Two strokes rather than a glyph, so it stays
   // crisp at 10 pixels inside a colour window's head.
   close: 'M4 4l8 8 M12 4l-8 8',
@@ -9690,6 +9752,8 @@ class ViewerPanel {
       view: 'model',
       layers: null,
       oneLayer: false,
+      /** Whether the print is playing back, and where it has got to. */
+      playing: false,
       /** Where the cut was when the one-layer switch was last on. */
       lastCut: 0,
       bed: { available: false, visible: false },
@@ -9720,6 +9784,8 @@ class ViewerPanel {
     /** The export in flight: its own handle, timer and canvas, none of them shared. */
     this.stillRender = null;
     this.traceExportHandle = undefined;
+    /** The pending wakeup for the next playback step: a frame, and its watchdog. */
+    this.playHandle = undefined;
     /** The one pending wakeup for the next trace pass: a frame, and its watchdog. */
     this.traceFrameHandle = undefined;
     this.traceTimer = undefined;
@@ -9742,6 +9808,27 @@ class ViewerPanel {
    * about a second rather than running until someone looks away.
    */
   static maxTraceSamples = 96;
+
+  /**
+   * How long the first layer takes to lay down, in milliseconds.
+   *
+   * The first layer is the one worth watching stroke by stroke: it is the outline
+   * and the infill of a single sheet of plastic, and it is where a print's shape
+   * first appears. Everything above it goes by too fast to read at that
+   * resolution, so the rest of the plate is drawn a layer at a time instead.
+   */
+  static playFirstLayerMs = 2600;
+
+  /**
+   * How long each later layer takes, in milliseconds.
+   *
+   * Short, and not scaled by how many strokes the layer has: a plate has tens of
+   * thousands of strokes on its bottom layer and a few hundred on its top, and
+   * pacing by stroke count made the bottom crawl and the top flicker. A
+   * constant step reads as a print being built. It also keeps a 400-layer plate to
+   * a sensible length -- about twelve seconds.
+   */
+  static playLayerMs = 26;
 
   /**
    * How long to wait for a frame before assuming none is coming, in milliseconds.
@@ -10040,6 +10127,16 @@ class ViewerPanel {
     });
     this.bedButton.hidden = true;
     this.snapshotButton = this.button({ icon: 'snapshot', label: t('controls.snapshot'), onClick: () => this.saveImage() });
+    // Playback is a preview of the *print*, not of the file: it walks the plate
+    // the way the machine builds it, which is the one thing a still frame cannot
+    // show. Only a sliced plate has an order to walk, so the button is hidden for
+    // a model.
+    this.playButton = this.button({
+      icon: 'play',
+      label: t('controls.play'),
+      onClick: () => this.togglePlay(),
+    });
+    this.playButton.hidden = true;
     // Tracing replaces the interactive view rather than sitting beside it: the two
     // are the same scene, and showing both would halve the space for each. The
     // button toggles, and the overlay can be dismissed with it.
@@ -10073,6 +10170,7 @@ class ViewerPanel {
       this.lightingButton,
       this.bedButton,
       this.snapshotButton,
+      this.playButton,
       this.traceButton,
       this.saveTracedButton,
       this.backgroundPicker.node,
@@ -10282,6 +10380,10 @@ class ViewerPanel {
   clearStage() {
     // Stops the pass loop and abandons any export in flight with it.
     this.stopTrace();
+    // The player's own loop is a chain of pending callbacks, so it has to be
+    // broken here as well: a step that survives this would call into a viewer
+    // whose context has gone.
+    this.stopPlay(true);
     this.bvh = null;
     if (this.tracer !== null && this.tracer !== undefined) {
       this.tracer.dispose();
@@ -10690,6 +10792,11 @@ class ViewerPanel {
   setLayers(from, to, dim) {
     const { viewer, state } = this;
     if (viewer === null || state.layers === null) return;
+    // While the print is playing back, the range belongs to the player: it writes
+    // one every step. A drag that landed mid-animation would fight it frame by
+    // frame, so it is ignored rather than half-applied -- and stopping the player
+    // restores the range anyway, so nothing the user set is lost.
+    if (state.playing) return;
     // With the one-layer switch on there is only the upper value: the lower one
     // follows it, which is what makes the whole plate collapse to one layer.
     if (state.oneLayer) viewer.setLayerRange(to, to, { dim });
@@ -10977,6 +11084,208 @@ class ViewerPanel {
     this.queueSave();
   }
 
+  /* ------------------------------------------------------------- playback -- */
+
+  /**
+   * Play the plate as the machine prints it.
+   *
+   * This is not an animation of the model -- it is the file's own order, which is
+   * the one thing a still frame cannot show. A slice is a set of strokes that the
+   * slicer emitted layer by layer, and that order *is* the print.
+   *
+   * Two speeds, because one does not suit both ends:
+   *
+   *   - the first layer is drawn stroke by stroke, over a couple of seconds. It
+   *     is the outline and infill of one sheet of plastic, and it is where the
+   *     print's shape first appears -- at layer speed it is over before the eye
+   *     finds it;
+   *   - every layer above arrives whole, on a fixed step. Pacing those by their
+   *     stroke count made the bottom (tens of thousands of strokes) crawl and the
+   *     top (hundreds) flicker.
+   *
+   * The player drives the same two things the slider does -- the layer range and,
+   * for the first layer only, a cut inside it -- so leaving it in any state is the
+   * same as having dragged the slider there. Nothing is left in a mode.
+   */
+  togglePlay() {
+    if (this.state.playing) this.stopPlay();
+    else this.startPlay();
+  }
+
+  /** Begin playback from the bottom of the plate. */
+  startPlay() {
+    const { viewer, state } = this;
+    if (viewer === null || state.layers === null || state.layers.count === 0) return;
+    const layout = viewer.strokeLayout();
+    if (layout.layerFirst === null || layout.layerFirst.length < 2) return;
+
+    // Remember where the user was *before* anything else runs, so stopping puts the
+    // view back rather than leaving the plate cut at whatever layer the animation
+    // reached.
+    //
+    // Captured here rather than after the reset below, which is what the first
+    // version did: `stopPlay` restores the previous restore-point -- correct when
+    // it is called by a button, wrong when it is called as a cleanup at the top of
+    // this method. Reading the range afterwards captured a range the cleanup had
+    // just put back from a previous run, so a second play-through saved the wrong
+    // place and stopping returned there.
+    const restore = { range: [...state.layers.range], dim: state.layers.dim, oneLayer: state.oneLayer };
+    this.stopPlay();
+    this.playRestore = restore;
+    if (state.oneLayer) {
+      // One-layer mode would fight the animation: it collapses the range to a
+      // single layer by construction.
+      state.oneLayer = false;
+      this.syncLayerSlider();
+    }
+    state.playing = true;
+    this.playStarted = this.now();
+    viewer.setStrokeCap(0);
+    viewer.setLayerRange(0, 0, { dim: false });
+    this.syncToolbar();
+    this.stepPlay();
+  }
+
+  /**
+   * One step of playback.
+   *
+   * Scheduled rather than looped: a loop would hold the thread for the length of
+   * the animation and freeze the tab, and the whole point is to watch the plate
+   * change. Each step draws one frame's worth of progress and asks for the next.
+   */
+  stepPlay() {
+    if (!this.state.playing) return;
+    const { viewer, state } = this;
+    if (viewer === null || state.layers === null) { this.stopPlay(); return; }
+    const layout = viewer.strokeLayout();
+    const layerFirst = layout.layerFirst;
+    if (layerFirst === null || layerFirst.length < 2) { this.stopPlay(); return; }
+
+    const now = this.now();
+    const elapsed = now - this.playStarted;
+    const firstSpan = ViewerPanel.playFirstLayerMs;
+
+    if (elapsed < firstSpan) {
+      // The first layer, in proportion to time. The cut is a stroke index inside
+      // that layer's run; the run starts where layer 1 does and ends where the
+      // next layer begins.
+      const start = layerFirst[0];
+      const end = layerFirst[1];
+      const progress = Math.max(0, Math.min(1, elapsed / firstSpan));
+      // Eased, so the layer does not appear to stop and start: the extruder's own
+      // pace is not constant and a linear sweep reads as a wipe.
+      const eased = 1 - Math.pow(1 - progress, 3);
+      viewer.setStrokeCap(start + Math.round((end - start) * eased));
+      state.layers = { count: state.layers.count, range: [0, 0], dim: false };
+      // The slider is the readout of the layer range, so it follows the playhead:
+      // a strip still sitting at the top of the plate while the first layer is
+      // being drawn says the player is not doing anything.
+      this.syncLayerSlider();
+      this.syncStats();
+      this.schedulePlayStep();
+      return;
+    }
+
+    // Past the first layer: whole layers, at a fixed step. The count is derived
+    // from elapsed time rather than accumulated, so a dropped frame does not slow
+    // the animation down -- it skips ahead, which is what a clock should do.
+    const rest = elapsed - firstSpan;
+    const step = Math.max(1, ViewerPanel.playLayerMs);
+    const layer = Math.min(layerFirst.length - 1, 1 + Math.floor(rest / step));
+
+    viewer.setStrokeCap(null);
+    viewer.setLayerRange(0, layer, { dim: false });
+    state.layers = { count: state.layers.count, range: [0, layer], dim: false };
+    this.syncLayerSlider();
+    this.syncStats();
+
+    if (layer >= layerFirst.length - 1) {
+      // The print is finished. The last layer is left on screen -- stopping at
+      // once would blank it back to the layer the user was on before pressing
+      // play, which reads as the button doing nothing.
+      state.playing = false;
+      this.playFinished = true;
+      this.syncToolbar();
+      this.syncLayerSlider();
+      return;
+    }
+    this.schedulePlayStep();
+  }
+
+  /** Ask for the next playback step. */
+  schedulePlayStep() {
+    if (!this.state.playing) return;
+    const view = this.document.defaultView;
+    if (view === undefined || view === null) return;
+    let done = false;
+    const once = () => {
+      if (done) return;
+      done = true;
+      if (this.playHandle !== undefined) {
+        view.cancelAnimationFrame?.(this.playHandle.frame);
+        view.clearTimeout?.(this.playHandle.timer);
+        this.playHandle = undefined;
+      }
+      this.stepPlay();
+    };
+    const frame = typeof view.requestAnimationFrame === 'function'
+      ? view.requestAnimationFrame(once)
+      : undefined;
+    // A timer behind the frame, cancelled when either fires: a page that is not
+    // presenting never gets the callback, and a playback that silently stops on a
+    // background tab is the same bug the trace loop had.
+    const timer = view.setTimeout(once, 32);
+    this.playHandle = frame === undefined ? { timer } : { frame, timer };
+  }
+
+  /**
+   * Stop playback, and put the view back.
+   *
+   * `finish` is the difference between pressing stop and letting the print
+   * complete. Stopping restores the range and dim the user had before pressing
+   * play: they interrupted an animation and want their view back. Finishing
+   * leaves the whole plate, because that is what the print looks like done.
+   */
+  stopPlay(finish = false) {
+    if (this.playHandle !== undefined) {
+      const view = this.document.defaultView;
+      view?.cancelAnimationFrame?.(this.playHandle.frame);
+      view?.clearTimeout?.(this.playHandle.timer);
+      this.playHandle = undefined;
+    }
+    const wasPlaying = this.state.playing;
+    this.state.playing = false;
+    this.playFinished = finish;
+    const { viewer, state } = this;
+    if (viewer === null) return;
+    viewer.setStrokeCap(null);
+    if (!finish && this.playRestore !== undefined && state.layers !== null) {
+      const { range, dim, oneLayer } = this.playRestore;
+      const last = state.layers.count - 1;
+      const low = Math.max(0, Math.min(last, range[0]));
+      const high = Math.max(low, Math.min(last, range[1]));
+      state.oneLayer = oneLayer === true;
+      if (state.oneLayer) viewer.setLayerRange(high, high, { dim });
+      else viewer.setLayerRange(low, high, { dim });
+      const info = viewer.layerInfo();
+      state.layers = { count: info.count, range: info.range, dim: info.dim };
+    } else if (state.layers !== null) {
+      // Finished: the whole plate, so the button leaves the print in the state it
+      // is describing.
+      viewer.setLayerRange(0, state.layers.count - 1, { dim: false });
+      const info = viewer.layerInfo();
+      state.layers = { count: info.count, range: info.range, dim: info.dim };
+    }
+    this.playRestore = undefined;
+    if (wasPlaying) this.syncLayerSlider();
+    this.syncToolbar();
+  }
+
+  /** Playback's clock. Separated so a test can drive it without waiting. */
+  now() {
+    return globalThis.performance?.now?.() ?? Date.now();
+  }
+
   /* -------------------------------------------------------------- scenes -- */
 
   /** Apply a background colour to the scene. */
@@ -11058,6 +11367,20 @@ class ViewerPanel {
 
     this.resetButton.disabled = !ready || this.loading === true;
     this.snapshotButton.disabled = !ready;
+
+    // Playback is only meaningful for a sliced plate: it walks the file's own
+    // stroke order, and an STL has none. Hidden rather than disabled, so a model
+    // does not offer a control that could never work.
+    const playable = ready && state.layers !== null && state.layers.count > 1;
+    this.playButton.hidden = !playable || state.tracing === true;
+    this.playButton.disabled = !playable;
+    this.playButton.classList.toggle('is-pressed', state.playing);
+    this.playButton.setAttribute('aria-pressed', String(state.playing));
+    this.playButton.title = state.playing ? this.t('controls.playStop') : this.t('controls.play');
+    // The glyph swaps rather than the button moving: a second button that appears
+    // while the first is still under the pointer is a control that jumps.
+    const glyph = icon(state.playing ? 'pause' : 'play', 16);
+    if (glyph !== null) this.playButton.replaceChildren(glyph);
     this.traceButton.disabled = !ready;
     this.traceButton.classList.toggle('is-pressed', state.tracing);
     this.traceButton.setAttribute('aria-pressed', String(state.tracing));
@@ -11104,6 +11427,13 @@ class ViewerPanel {
       text = this.t('status.traceExporting', {
         done: String(state.traceExported ?? 0),
         total: String(state.traceExportTotal ?? 0),
+      });
+    } else if (state.playing && state.layers !== null) {
+      // The layer number is the useful figure here: the plate is being built, and
+      // the count is how far it has got.
+      text = this.t('status.printingLayer', {
+        layer: String((state.layers.range[1] ?? 0) + 1),
+        total: String(state.layers.count),
       });
     } else if (state.tracing) {
       // The count is the useful number: it says how much further the image will

@@ -1067,6 +1067,15 @@ export function createViewer(canvas) {
    */
   let layerFirst = null;
   let strokeTotal = 0;
+  /**
+   * How far the print has got, as a stroke index, or null for "all of it".
+   *
+   * Playback needs to show a layer *partly* built: the first layer is watched
+   * stroke by stroke, and the rest arrive whole. The layer range cannot express
+   * that -- it names layers, and this names a position inside one -- so the run
+   * the range selects is additionally cut at this index.
+   */
+  let strokeCap = null;
   let dimBelow = false;
   let indexCount = 0;
   let meshScale = 1;
@@ -1204,6 +1213,8 @@ export function createViewer(canvas) {
     dimBelow = false;
     layerFirst = mesh.layerFirst ?? null;
     strokeTotal = mesh.segments ?? 0;
+    // A new plate starts whole, whatever the previous one was cut down to.
+    strokeCap = null;
 
     meshCenter = [mesh.center[0], mesh.center[1], mesh.center[2]];
     const half = [
@@ -1248,6 +1259,9 @@ export function createViewer(canvas) {
     segmentCount = 0;
     layerFirst = null;
     strokeTotal = 0;
+    // An index into a buffer that is being replaced means nothing. Cleared on
+    // every upload, or a switch of view would open the new plate cut short.
+    strokeCap = null;
     // A plain model carries no bed, so one left over from a sliced file must not
     // stay behind and be offered as if it belonged to this file.
     uploadBed(undefined);
@@ -1354,7 +1368,12 @@ export function createViewer(canvas) {
     // The layer after the last visible one starts the next run, so its offset is
     // where this range ends; the final layer runs to the end of the buffer.
     const end = high + 1 < layerFirst.length ? layerFirst[high + 1] : strokeTotal;
-    return { first, count: Math.max(0, end - first) };
+    // The playback cap is applied after the range, not instead of it: a range
+    // says which layers, and the cap says how far into the last of them the
+    // extruder has got. Whichever is smaller wins, so the cap can never reveal a
+    // layer the slider is hiding.
+    const limited = strokeCap === null ? end : Math.min(end, strokeCap);
+    return { first, count: Math.max(0, limited - first) };
   };
 
   const draw = () => {
@@ -1795,6 +1814,9 @@ export function createViewer(canvas) {
     pitch = 0.42;
     zoom = 1;
     pan = [0, 0, 0];
+    // A cut-through plate is a transient of the player, not a view: leaving it
+    // set would make the reset button return a half-drawn print.
+    strokeCap = null;
     notifyOrbit();
     draw();
   };
@@ -2297,6 +2319,35 @@ export function createViewer(canvas) {
   /** How many layers the current plate has, or 0 for a model. */
   const layerInfo = () => ({ count: layerCount, range: [layerRange[0], layerRange[1]], dim: dimBelow });
 
+  /**
+   * Where every layer's strokes begin, plus the total.
+   *
+   * Playback is planned against this: it needs to know how many strokes each layer
+   * contains so the first layer can be given a share of the running time in
+   * proportion to its detail, and so a frame can ask for "the first 1 200 strokes"
+   * without re-deriving where layer 0 ends.
+   */
+  const strokeLayout = () => ({
+    total: strokeTotal,
+    layerFirst: layerFirst === null ? null : Array.from(layerFirst),
+  });
+
+  /**
+   * Cut the drawing at a stroke index.
+   *
+   * `null` removes the cut. Deliberately not clamped here to the visible run: the
+   * caller is a schedule that walks forward, and clamping would silently stall it
+   * at the last layer instead of letting it finish.
+   *
+   * @param index - strokes to draw from the start of the visible run, or null.
+   */
+  const setStrokeCap = (index) => {
+    const next = index === null || index === undefined ? null : Math.max(0, Math.round(index));
+    if (next === strokeCap) return;
+    strokeCap = next;
+    draw();
+  };
+
   /** Switch between shaded and wireframe drawing. */
   const setMode = (next) => {
     mode = next;
@@ -2350,5 +2401,5 @@ export function createViewer(canvas) {
     gl.deleteProgram(bedProgram.program);
   };
 
-  return { setMesh, setMode, setLayerRange, layerInfo, setBedVisible, bedInfo, setView, setOrbit, setCamera, orientation, sceneState, setBackground, backgroundInfo, setPlainLighting, plainLightingInfo, renderer: () => rendererInfo, setSurface, surfaceInfo, setLightLevel, renderToImage, setPalette, paletteInfo, watchOrbit, reset, dispose, redraw: draw, usesColours, setZoom, zoomInfo: () => zoom };
+  return { setMesh, setMode, setLayerRange, layerInfo, strokeLayout, setStrokeCap, setBedVisible, bedInfo, setView, setOrbit, setCamera, orientation, sceneState, setBackground, backgroundInfo, setPlainLighting, plainLightingInfo, renderer: () => rendererInfo, setSurface, surfaceInfo, setLightLevel, renderToImage, setPalette, paletteInfo, watchOrbit, reset, dispose, redraw: draw, usesColours, setZoom, zoomInfo: () => zoom };
 }

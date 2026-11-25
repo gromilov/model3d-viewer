@@ -63,5 +63,8 @@
   "picker.palette": "Палитра",
   "picker.eyedropper": "Взять цвет с экрана",
   "picker.ok": "Ок",
-  "picker.cancel": "Отмена"
+  "picker.cancel": "Отмена",
+  "controls.play": "Проиграть печать",
+  "controls.playStop": "Остановить проигрывание",
+  "status.printingLayer": "Печать слоя {layer} из {total}"
 }
